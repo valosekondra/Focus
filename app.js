@@ -222,7 +222,7 @@ function topHtml() {
 
 function render() {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.view === S.view));
-  $("#top").innerHTML = topHtml();
+  const top = $("#top"); if (top) top.innerHTML = topHtml();   // pojistka proti staršímu index.html z mezipaměti
   const v = $("#view");
   if (!signedIn()) { $("#fab").hidden = true; $("#tabs").hidden = true; v.innerHTML = signinHtml(); return; }
   $("#tabs").hidden = false;

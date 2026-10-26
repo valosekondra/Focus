@@ -9,8 +9,9 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-192.png">
-  <link rel="stylesheet" href="style.css">
-  <script src="config.js"></script>
+  <!-- ?v= = verze: po nahrání nové verze zvýšit, aby se nikdy nesmíchaly staré a nové soubory -->
+  <link rel="stylesheet" href="style.css?v=3">
+  <script src="config.js?v=3"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -40,6 +41,6 @@
   <div id="sheet-backdrop" class="backdrop"></div>
   <div id="sheet" class="sheet" role="dialog" aria-modal="true"></div>
   <div id="toast" class="toast"></div>
-  <script src="app.js"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
