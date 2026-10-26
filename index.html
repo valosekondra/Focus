@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F4F4F5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+  <title>Focus</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <div class="brand"><span class="logo"><i></i></span><span>Focus</span></div>
+      <div class="top-actions">
+        <button class="icon-btn" id="btn-refresh" aria-label="Obnovit">⟳</button>
+      </div>
+    </header>
+    <main id="view"></main>
+    <button class="fab" id="fab" aria-label="Přidat">+</button>
+    <nav class="tabs" id="tabs">
+      <button data-view="today" class="on"><span class="ti">◷</span>Dnes</button>
+      <button data-view="week"><span class="ti">▦</span>Týden</button>
+      <button data-view="tasks"><span class="ti">✓</span>Úkoly</button>
+      <button data-view="settings"><span class="ti">⚙</span>Nastavení</button>
+    </nav>
+  </div>
+  <div id="sheet-backdrop" class="backdrop"></div>
+  <div id="sheet" class="sheet" role="dialog" aria-modal="true"></div>
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
