@@ -1,5 +1,5 @@
 // Offline: kostra appky z mezipaměti (data z Googlu se ukládají zvlášť v localStorage).
-const CACHE = "focus-v1";
+const CACHE = "focus-v2";
 const SHELL = ["./", "index.html", "style.css", "app.js", "config.js", "manifest.webmanifest", "icon.svg", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {

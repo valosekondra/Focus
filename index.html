@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#F4F4F5" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#111113">
+  <meta name="color-scheme" content="light dark">
   <title>Focus</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -14,20 +14,27 @@
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-today" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-week" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-tasks" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.3 12.2l2.5 2.5 5-5.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.05-4.95M19 5v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-left" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    </defs>
+  </svg>
   <div id="app">
-    <header class="top">
-      <div class="brand"><span class="logo"><i></i></span><span>Focus</span></div>
-      <div class="top-actions">
-        <button class="icon-btn" id="btn-refresh" aria-label="Obnovit">⟳</button>
-      </div>
-    </header>
+    <header class="top" id="top"></header>
     <main id="view"></main>
-    <button class="fab" id="fab" aria-label="Přidat">+</button>
+    <button class="fab" id="fab" aria-label="Přidat"><svg><use href="#i-plus"/></svg></button>
     <nav class="tabs" id="tabs">
-      <button data-view="today" class="on"><span class="ti">◷</span>Dnes</button>
-      <button data-view="week"><span class="ti">▦</span>Týden</button>
-      <button data-view="tasks"><span class="ti">✓</span>Úkoly</button>
-      <button data-view="settings"><span class="ti">⚙</span>Nastavení</button>
+      <button data-view="today" class="on"><svg><use href="#i-today"/></svg>Dnes</button>
+      <button data-view="week"><svg><use href="#i-week"/></svg>Týden</button>
+      <button data-view="tasks"><svg><use href="#i-tasks"/></svg>Úkoly</button>
+      <button data-view="settings"><svg><use href="#i-settings"/></svg>Nastavení</button>
     </nav>
   </div>
   <div id="sheet-backdrop" class="backdrop"></div>

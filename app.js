@@ -189,9 +189,40 @@ async function refresh(full) {
 }
 
 // ---------- vykreslení ----------
+const SHORT = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
+const icon = (id, cls) => `<svg class="${cls || ""}"><use href="#i-${id}"/></svg>`;
+
+function topHtml() {
+  if (!signedIn()) return "";
+  const refresh = `<button class="icon-btn${S.loading ? " spin" : ""}" data-act="refresh" aria-label="Obnovit">${icon("refresh")}</button>`;
+  if (S.view === "today") {
+    const d = S.day, today = sod(new Date()), isToday = sameDay(d, today), w = monday(d);
+    let strip = `<div class="strip"><button class="strip-nav" data-act="day" data-n="-7" aria-label="Předchozí týden">${icon("left")}</button>`;
+    for (let i = 0; i < 7; i++) {
+      const x = addDays(w, i), busy = eventsOn(x).length + tasksDue(x, false).length;
+      strip += `<button class="sd${sameDay(x, d) ? " on" : ""}${sameDay(x, today) ? " is-today" : ""}" data-act="pick" data-d="${+x}"><span>${SHORT[x.getDay()]}</span><b>${x.getDate()}</b><i${busy ? "" : ' class="no"'}></i></button>`;
+    }
+    strip += `<button class="strip-nav" data-act="day" data-n="7" aria-label="Další týden">${icon("right")}</button></div>`;
+    return `<div class="hdr"><div class="hdr-title">${dayLabel(d)}<small>${dateLong(d)}${d.getFullYear() !== today.getFullYear() ? " " + d.getFullYear() : ""}${isToday ? " · dnes" : ""}</small></div>
+      ${isToday ? "" : `<button class="today-pill" data-act="today">Dnes</button>`}${refresh}</div>` + strip;
+  }
+  if (S.view === "week") {
+    const w = S.week, end = addDays(w, 6), thisWeek = sameDay(w, monday(new Date()));
+    return `<div class="hdr"><button class="icon-btn" data-act="week" data-n="-7" aria-label="Předchozí">${icon("left")}</button>
+      <div class="hdr-title center">${thisWeek ? "Tento týden" : "Týden"}<small>${w.getDate()}. ${w.getMonth() !== end.getMonth() ? (w.getMonth() + 1) + ". " : ""}– ${end.getDate()}. ${end.getMonth() + 1}.</small></div>
+      <button class="icon-btn" data-act="week" data-n="7" aria-label="Další">${icon("right")}</button></div>
+      ${thisWeek ? "" : `<div class="hdr-sub"><button class="today-pill" data-act="thisweek">Zpět na tento týden</button></div>`}`;
+  }
+  if (S.view === "tasks") {
+    const open = S.tasks.filter(t => !t.done).length;
+    return `<div class="hdr"><div class="hdr-title">Úkoly<small>${open} ${plural(open, "otevřený", "otevřené", "otevřených")}</small></div>${refresh}</div>`;
+  }
+  return `<div class="hdr"><div class="hdr-title">Nastavení<small>Focus pro telefon</small></div></div>`;
+}
+
 function render() {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.view === S.view));
-  $("#btn-refresh").classList.toggle("spin", S.loading > 0);
+  $("#top").innerHTML = topHtml();
   const v = $("#view");
   if (!signedIn()) { $("#fab").hidden = true; $("#tabs").hidden = true; v.innerHTML = signinHtml(); return; }
   $("#tabs").hidden = false;
@@ -228,16 +259,12 @@ function tasksDue(day, includeLate) {
 function todayHtml() {
   const d = S.day, isToday = sameDay(d, new Date());
   const evs = eventsOn(d), allDay = evs.filter(e => e.allDay), timed = evs.filter(e => !e.allDay);
-  let html = `<div class="daynav">
-      <button class="nav-btn" data-act="day" data-n="-1">‹</button>
-      <div class="title">${dayLabel(d)}${isToday ? `<span class="badge">${d.getDate()}</span>` : ""}<small>${dateLong(d)}${isToday ? " · dnes" : ""}</small></div>
-      ${isToday ? "" : `<button class="today-pill" data-act="today">Dnes</button>`}
-      <button class="nav-btn" data-act="day" data-n="1">›</button></div>`;
+  let html = "";
 
-  // úkoly na den (dnes i zpožděné)
+  // úkoly na den (dnes i zpožděné); štítek termínu jen u zpožděných – „dnes“ je tu jasné
   const due = tasksDue(d, isToday);
   html += `<div class="card"><div class="card-head"><span class="card-title">Úkoly</span><span class="muted" style="font-size:13px">${due.length || ""}</span></div>`;
-  html += due.length ? due.map(taskRow).join("") : `<div class="empty">${isToday ? "Na dnes nic – užij si to." : "Žádné úkoly s termínem."}</div>`;
+  html += due.length ? due.map(t => taskRow(t, sameDay(t.due, d))).join("") : `<div class="empty">${isToday ? "Na dnes nic – užij si to." : "Žádné úkoly s termínem."}</div>`;
   html += `</div>`;
 
   // kalendář
@@ -278,11 +305,8 @@ function timelineHtml(d, evs, isToday) {
 }
 
 function weekHtml() {
-  const w = S.week, end = addDays(w, 6);
-  let html = `<div class="daynav"><button class="nav-btn" data-act="week" data-n="-7">‹</button>
-    <div class="title">${w.getDate()}. – ${dateLong(end)}<small>Týden</small></div>
-    ${sameDay(w, monday(new Date())) ? "" : `<button class="today-pill" data-act="thisweek">Tento týden</button>`}
-    <button class="nav-btn" data-act="week" data-n="7">›</button></div><div class="card">`;
+  const w = S.week;
+  let html = `<div class="card">`;
   for (let i = 0; i < 7; i++) {
     const d = addDays(w, i), evs = eventsOn(d), due = tasksDue(d, false), isT = sameDay(d, new Date());
     html += `<div class="week-day"><div class="week-head${isT ? " today" : ""}" data-act="openday" data-d="${+d}">${dayLabel(d)} <span class="muted">${d.getDate()}. ${d.getMonth() + 1}.</span></div>`;
@@ -303,11 +327,12 @@ function dueChip(t) {
   const txt = diff === 0 ? "dnes" : diff === 1 ? "zítra" : diff === -1 ? "včera" : diff > 1 && diff < 7 ? DAYS[t.due.getDay()] : t.due.getDate() + ". " + (t.due.getMonth() + 1) + ".";
   return `<span class="due ${cls}">${txt}</span>`;
 }
-function taskRow(t) {
+function taskRow(t, hideDue) {
   const list = S.lists.find(l => l.id === t.listId);
+  const meta = S.view === "tasks" ? (S.listFilter === "all" && list ? list.name : "") : (list && S.lists.length > 1 ? list.name : "");
   return `<div class="task${t.done ? " done" : ""}" data-task="${esc(t.id)}">
     <button class="check" data-act="toggle" data-id="${esc(t.id)}" aria-label="Hotovo">✓</button>
-    <div class="tb"><div class="ts">${esc(t.title)}</div>${S.listFilter === "all" && list && S.view === "tasks" ? `<div class="tm">${esc(list.name)}</div>` : ""}</div>${t.done ? "" : dueChip(t)}</div>`;
+    <div class="tb"><div class="ts">${esc(t.title)}</div>${meta ? `<div class="tm">${esc(meta)}</div>` : ""}</div>${t.done || hideDue ? "" : dueChip(t)}</div>`;
 }
 
 function tasksHtml() {
@@ -460,6 +485,7 @@ document.addEventListener("click", async e => {
     if (act === "refresh") return refresh(true);
     if (act === "day") { S.day = addDays(S.day, +a.dataset.n); return dayChanged(); }
     if (act === "today") { S.day = sod(new Date()); render.scrolled = false; return dayChanged(); }
+    if (act === "pick") { S.day = new Date(+a.dataset.d); render.scrolled = !sameDay(S.day, new Date()); return dayChanged(); }
     if (act === "week") { S.week = addDays(S.week, +a.dataset.n); return dayChanged(); }
     if (act === "thisweek") { S.week = monday(new Date()); return dayChanged(); }
     if (act === "openday") { S.day = new Date(+a.dataset.d); S.view = "today"; render.scrolled = true; window.scrollTo({ top: 0 }); return dayChanged(); }
@@ -497,7 +523,18 @@ $("#tabs").addEventListener("click", e => {
   dayChanged();
 });
 $("#fab").addEventListener("click", () => S.view === "tasks" ? taskSheet(null) : eventSheet(null));
-$("#btn-refresh").addEventListener("click", () => refresh(true));
+// přetažení prstem doleva / doprava = další / předchozí den (týden)
+let touch = null;
+$("#view").addEventListener("touchstart", e => { if (e.touches.length === 1) touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }; }, { passive: true });
+$("#view").addEventListener("touchend", e => {
+  if (!touch || (S.view !== "today" && S.view !== "week")) return;
+  const dx = e.changedTouches[0].clientX - touch.x, dy = e.changedTouches[0].clientY - touch.y, fast = Date.now() - touch.t < 600;
+  touch = null;
+  if (!fast || Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return;
+  const dir = dx < 0 ? 1 : -1;
+  if (S.view === "today") S.day = addDays(S.day, dir); else S.week = addDays(S.week, 7 * dir);
+  dayChanged();
+}, { passive: true });
 $("#sheet-backdrop").addEventListener("click", closeSheet);
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 
@@ -512,7 +549,15 @@ setInterval(() => { if (S.view === "today" && !document.hidden && !$("#sheet").c
 function applyTheme() {
   const t = store.get("theme", "auto");
   if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  syncBars();
 }
+// Stavová i spodní systémová lišta Androidu mají barvu podle theme-color – musí sedět s pozadím appky.
+function syncBars() {
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#111113";
+  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute("content", bg);
+  document.documentElement.style.background = bg;
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { syncBars(); render(); });
 
 // ---------- ukázková data (?demo) ----------
 const Demo = {
@@ -556,7 +601,7 @@ const startView = location.hash.slice(1);
 if (["today", "week", "tasks", "settings"].includes(startView)) { S.view = startView; render.scrolled = startView !== "today"; }
 applyTheme();
 const forced = new URLSearchParams(location.search).get("theme");
-if (forced === "dark" || forced === "light") document.documentElement.dataset.theme = forced;
+if (forced === "dark" || forced === "light") { document.documentElement.dataset.theme = forced; syncBars(); }
 if (DEMO) { store.set = () => { }; Demo.init(); }
 render();
 if (!DEMO && signedIn()) { if (S.token) refresh(); else S.needAuth = true, render(); }
