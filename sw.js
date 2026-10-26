@@ -1,7 +1,7 @@
 // Offline: kostra appky z mezipaměti (data z Googlu se ukládají zvlášť v localStorage).
 // Vždy nejdřív síť s ověřením u serveru (cache: "no-cache"), aby se po nahrání nové verze
 // nesmíchaly staré a nové soubory; bez sítě poslední uložená verze.
-const CACHE = "focus-v3";
+const CACHE = "focus-v4";
 
 self.addEventListener("install", () => self.skipWaiting());
 
