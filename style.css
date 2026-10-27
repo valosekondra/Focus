@@ -172,6 +172,12 @@ main { padding: 0 12px; }
 .field label { width: 86px; flex: none; color: var(--muted); font-size: 14px; }
 .field input, .field select { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 15px; height: 46px; }
 .field:focus-within { background: var(--card); }
+.field input[type="date"] { flex: 1.3; }
+.field input.tm { flex: 0 0 84px; text-align: right; }
+.field .grow { flex: 1; }
+.field[data-allday] { cursor: pointer; }
+.field.note { align-items: flex-start; padding-top: 12px; }
+.field textarea { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: 15px; color: var(--text); resize: vertical; min-height: 44px; padding: 0 0 8px; }
 .field:focus-within label { color: var(--text); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -2px 0 12px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px 7px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-size: 13px; font-weight: 500; color: var(--muted); }

@@ -9,7 +9,7 @@ const DEMO = new URLSearchParams(location.search).has("demo");
 const SCOPES = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/tasks";
 const CAL_API = "https://www.googleapis.com/calendar/v3";
 const TASK_API = "https://tasks.googleapis.com/tasks/v1";
-const TRACKED_NAME = "Focus · naměřeno";
+const TRACKED_NAME = "Focus · naměřeno", WORK_NAME = "Focus · firemní";
 const EVENT_COLORS = { 1: "#7986CB", 2: "#33B679", 3: "#8E24AA", 4: "#E67C73", 5: "#F6BF26", 6: "#F4511E", 7: "#039BE5", 8: "#616161", 9: "#3F51B5", 10: "#0B8043", 11: "#D50000" };
 const DAYS = ["neděle", "pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota"];
 const SHORT = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
@@ -68,8 +68,8 @@ S.tasks.forEach(t => { t.due = t.due ? new Date(t.due) : null; t.completed = t.c
 function revive(e) { e.start = new Date(e.start); e.end = new Date(e.end); }
 
 function selectedCals() {
-  const sel = store.get("calSel", null);
-  return S.calendars.filter(c => sel ? sel.includes(c.id) : (c.visible || c.primary));
+  const sel = store.get("calSel", null), workHidden = store.get("workHidden", false);
+  return S.calendars.filter(c => c.mirror ? !workHidden : sel ? sel.includes(c.id) : (c.visible || c.primary));
 }
 function writableCals() { return S.calendars.filter(c => c.role === "owner" || c.role === "writer"); }
 function defaultCal() {
@@ -126,6 +126,10 @@ async function loadCalendars() {
       if (c.deleted) return;
       const name = c.summaryOverride || c.summary;
       if (name === TRACKED_NAME) { tracked = c.id; return; }   // naměřený čas z PC – samostatně
+      if (name === WORK_NAME) {   // firemní schůzky zrcadlené z Outlooku – jen ke čtení, vždy zapnuté
+        out.push({ id: c.id, name: "Firemní", color: "#3F51B5", role: "reader", mirror: true, visible: true });
+        return;
+      }
       out.push({ id: c.id, name, color: (c.backgroundColor || "#7C5CD6").toUpperCase(), role: c.accessRole, primary: !!c.primary, visible: !!c.selected && !c.hidden });
     });
     page = j.nextPageToken || "";
@@ -178,9 +182,9 @@ function normEvent(e, cal) {
   const others = (e.attendees || []).some(a => !a.self) || (e.organizer && !e.organizer.self);
   const writable = cal.role === "owner" || cal.role === "writer";
   return {
-    id: e.id, calId: cal.id, title: e.summary || "(bez názvu)", loc: e.location || "", start, end, allDay,
+    id: e.id, calId: cal.id, title: e.summary || "(bez názvu)", loc: e.location || "", desc: e.description || "", start, end, allDay,
     color: EVENT_COLORS[e.colorId] || cal.color, free: e.transparency === "transparent", link: e.htmlLink || "",
-    lock: !writable ? "Kalendář „" + cal.name + "“ je jen pro čtení." : e.recurringEventId ? "Opakovaná událost – uprav ji v Google Kalendáři." : others ? "Schůzka s dalšími lidmi – uprav ji v Google Kalendáři." : ""
+    lock: cal.mirror ? "Firemní schůzka z Outlooku – změny dělej v Outlooku." : !writable ? "Kalendář „" + cal.name + "“ je jen pro čtení." : e.recurringEventId ? "Opakovaná událost – uprav ji v Google Kalendáři." : others ? "Schůzka s dalšími lidmi – uprav ji v Google Kalendáři." : ""
   };
 }
 
@@ -488,7 +492,7 @@ function settingsHtml() {
     <div class="sub">${S.trackedId ? "Zapisuje ho Focus na PC." : "Na PC: Nastavení → Google kalendář → Povolit nová oprávnění."}</div></div></div></div>`;
   html += `<div class="caption">Zobrazované kalendáře</div><div class="card">`;
   S.calendars.forEach(c => {
-    html += `<div class="row" data-act="togglecal" data-id="${esc(c.id)}"><span class="cdot" style="background:${c.color}"></span><div class="grow">${esc(c.name)}${c.role === "owner" || c.role === "writer" ? "" : `<div class="sub">jen pro čtení</div>`}</div><span class="sw${sel.includes(c.id) ? " on" : ""}"></span></div>`;
+    html += `<div class="row" data-act="togglecal" data-id="${esc(c.id)}"><span class="cdot" style="background:${c.color}"></span><div class="grow">${esc(c.name)}${c.mirror ? `<div class="sub">z Outlooku přes Focus na PC · jen pro čtení</div>` : c.role === "owner" || c.role === "writer" ? "" : `<div class="sub">jen pro čtení</div>`}</div><span class="sw${sel.includes(c.id) ? " on" : ""}"></span></div>`;
   });
   html += `</div><div class="caption">Nové události zakládat do</div><div class="chips" style="padding:0 4px">`;
   const target = defaultCal();
@@ -512,20 +516,25 @@ function calChips(selected, attr) {
 }
 
 function eventSheet(ev, presetStart) {
-  const start = ev ? ev.start : presetStart || nextSlot(), mins = ev ? Math.round((ev.end - ev.start) / 60000) : 60;
-  const ro = ev && ev.lock;
-  let cal = ev ? ev.calId : defaultCal();
+  const start = ev ? ev.start : presetStart || nextSlot();
+  const end = ev ? (ev.allDay ? addDays(ev.end, -1) : ev.end) : new Date(+start + 3600000);   // celodenní: konec včetně
+  const ro = ev && ev.lock, dis = ro ? "disabled" : "";
+  let cal = ev ? ev.calId : defaultCal(), allDay = !!(ev && ev.allDay);
+  const tm = d => pad(d.getHours()) + ":" + pad(d.getMinutes());
   openSheet(`<h2>${ev ? (ro ? esc(ev.title) : "Upravit událost") : "Nová událost"}</h2>
-    <div class="hint">${ev ? esc(calById(ev.calId).name) + (ev.loc ? " · " + esc(ev.loc) : "") : "Google kalendář"}</div>
+    <div class="hint">${ev ? esc(calById(ev.calId).name) : "Google kalendář"}</div>
     ${ro ? `<div class="lock">🔒 ${esc(ev.lock)}</div>` : ""}
     <form id="evf">
       ${ro ? "" : calChips(cal, "cal")}
-      <div class="group"><div class="field"><label>Název</label><input name="title" value="${ev ? esc(ev.title) : ""}" placeholder="Např. Večeře" ${ro ? "disabled" : ""} required></div></div>
+      <div class="group"><div class="field"><label>Název</label><input name="title" value="${ev ? esc(ev.title) : ""}" placeholder="Např. Večeře" ${dis} required></div>
+        <div class="field"><label>Místo</label><input name="loc" value="${ev ? esc(ev.loc) : ""}" placeholder="nepovinné" ${dis}></div></div>
       <div class="group">
-        <div class="field"><label>Datum</label><input type="date" name="date" value="${ymd(start)}" ${ro ? "disabled" : ""}></div>
-        ${ev && ev.allDay ? "" : `<div class="field"><label>Začátek</label><input type="time" name="time" value="${pad(start.getHours())}:${pad(start.getMinutes())}" step="300" ${ro ? "disabled" : ""}></div>
-        <div class="field"><label>Délka</label><select name="mins" ${ro ? "disabled" : ""}>${[15, 30, 45, 60, 90, 120, 180, 240].concat([mins]).filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b).map(m => `<option value="${m}"${m === mins ? " selected" : ""}>${m < 60 ? m + " min" : (m / 60).toString().replace(".", ",") + " h"}</option>`).join("")}</select></div>`}
+        <div class="field" data-allday><label>Celý den</label><span class="grow"></span><span class="sw${allDay ? " on" : ""}" id="sw-allday"></span></div>
+        <div class="field"><label>Začátek</label><input type="date" name="sdate" value="${ymd(start)}" ${dis}><input type="time" name="stime" class="tm" value="${tm(start)}" step="300" ${dis}></div>
+        <div class="field"><label>Konec</label><input type="date" name="edate" value="${ymd(end)}" ${dis}><input type="time" name="etime" class="tm" value="${tm(end)}" step="300" ${dis}></div>
       </div>
+      ${ro ? "" : `<div class="chips" id="lens">${[["30 min", 30], ["1 h", 60], ["2 h", 120], ["4 h", 240], ["8 h", 480]].map(([n, m]) => `<button type="button" class="chip" data-len="${m}">${n}</button>`).join("")}</div>`}
+      <div class="group"><div class="field note"><label>Poznámka</label><textarea name="desc" rows="2" placeholder="nepovinné" ${dis}>${ev ? esc(ev.desc || "") : ""}</textarea></div></div>
       <div class="err" id="everr"></div>
       <div class="actions">
         ${ev && !ro ? `<button type="button" class="btn danger" data-sheet="delete">Smazat</button>` : ""}
@@ -534,6 +543,19 @@ function eventSheet(ev, presetStart) {
       </div>
     </form>`, sheet => {
     sheet.querySelectorAll("[data-cal]").forEach(b => b.onclick = () => { cal = b.dataset.cal; sheet.querySelectorAll("[data-cal]").forEach(x => x.classList.toggle("on", x === b)); });
+    const q = n => sheet.querySelector(`[name="${n}"]`);
+    const at = (dn, tn) => { const d = parseYmd(q(dn).value) || sod(new Date()), [h, m] = (q(tn).value || "9:00").split(":").map(Number); d.setHours(h || 0, m || 0, 0, 0); return d; };
+    const setEnd = d => { q("edate").value = ymd(d); q("etime").value = tm(d); };
+    const syncAllDay = () => { sheet.querySelectorAll(".tm").forEach(x => x.style.display = allDay ? "none" : ""); const l = sheet.querySelector("#lens"); if (l) l.style.display = allDay ? "none" : ""; };
+    syncAllDay();
+    if (!ro) {
+      sheet.querySelector("[data-allday]").onclick = () => { allDay = !allDay; sheet.querySelector("#sw-allday").classList.toggle("on", allDay); syncAllDay(); };
+      // posun začátku posune i konec (zachová délku)
+      let lenMs = Math.max(0, at("edate", "etime") - at("sdate", "stime"));
+      ["sdate", "stime"].forEach(n => q(n).addEventListener("change", () => setEnd(new Date(+at("sdate", "stime") + lenMs))));
+      ["edate", "etime"].forEach(n => q(n).addEventListener("change", () => { lenMs = Math.max(0, at("edate", "etime") - at("sdate", "stime")); }));
+      sheet.querySelectorAll("[data-len]").forEach(b => b.onclick = () => { lenMs = +b.dataset.len * 60000; setEnd(new Date(+at("sdate", "stime") + lenMs)); });
+    }
     const del = sheet.querySelector('[data-sheet="delete"]');
     if (del) del.onclick = async () => {
       if (!confirm("Smazat „" + ev.title + "“?")) return;
@@ -542,11 +564,18 @@ function eventSheet(ev, presetStart) {
     };
     sheet.querySelector("#evf").onsubmit = async ev2 => {
       ev2.preventDefault(); if (ro) return;
-      const f = new FormData(ev2.target), d = parseYmd(f.get("date"));
+      const f = new FormData(ev2.target);
       let s, e;
-      if (ev && ev.allDay) { s = d; e = addDays(d, Math.max(1, Math.round((ev.end - ev.start) / 86400000))); }
-      else { const [h, m] = (f.get("time") || "9:00").split(":").map(Number); s = new Date(d); s.setHours(h, m, 0, 0); e = new Date(+s + Number(f.get("mins")) * 60000); }
-      const body = { summary: f.get("title").trim(), start: ev && ev.allDay ? { date: ymd(s) } : { dateTime: isoLocal(s) }, end: ev && ev.allDay ? { date: ymd(e) } : { dateTime: isoLocal(e) } };
+      if (allDay) { s = parseYmd(f.get("sdate")); e = addDays(parseYmd(f.get("edate")) || s, 1); }   // Google: konec celodenní je výlučný
+      else { s = at("sdate", "stime"); e = at("edate", "etime"); }
+      if (!s || e <= s) { sheet.querySelector("#everr").textContent = "Konec musí být po začátku."; return; }
+      const body = {
+        summary: f.get("title").trim(), location: f.get("loc").trim(), description: f.get("desc").trim(),
+        // při přepnutí celodenní ↔ časová je potřeba druhou podobu výslovně vynulovat
+        start: allDay ? { date: ymd(s), dateTime: null } : { dateTime: isoLocal(s), date: null },
+        end: allDay ? { date: ymd(e), dateTime: null } : { dateTime: isoLocal(e), date: null }
+      };
+      if (!ev) { ["start", "end"].forEach(k => { const o = body[k]; Object.keys(o).forEach(x => o[x] === null && delete o[x]); }); }
       try {
         if (!ev) await api("POST", CAL_API + "/calendars/" + encodeURIComponent(cal) + "/events", body);
         else {
@@ -637,7 +666,12 @@ document.addEventListener("click", async e => {
     if (act === "doneall") { store.set("doneAll", true); return render(); }
     if (act === "list") { S.listFilter = id; store.set("listFilter", id); return render(); }
     if (act === "newat") { const d = new Date(S.day); d.setHours(+a.dataset.h, 0, 0, 0); return eventSheet(null, d); }
-    if (act === "togglecal") { const ids = selectedCals().map(c => c.id); store.set("calSel", ids.includes(id) ? ids.filter(x => x !== id) : ids.concat(id)); render(); return refresh(); }
+    if (act === "togglecal") {
+      const c = S.calendars.find(x => x.id === id);
+      if (c && c.mirror) store.set("workHidden", !store.get("workHidden", false));
+      else { const ids = selectedCals().filter(x => !x.mirror).map(x => x.id); store.set("calSel", ids.includes(id) ? ids.filter(x => x !== id) : ids.concat(id)); }
+      render(); return refresh();
+    }
     if (act === "caltarget") { store.set("calTarget", id); return render(); }
     if (act === "theme") { store.set("theme", id); applyTheme(); return render(); }
     if (act === "signout") {
@@ -701,7 +735,8 @@ const Demo = {
     { id: "ondra@gmail.com", name: "Ondra", color: "#9FC6E7", role: "owner", primary: true, visible: true },
     { id: "ostatni", name: "Ostatní", color: "#F691B2", role: "owner", visible: true },
     { id: "doktori", name: "Doktoři a prohlídky", color: "#42D692", role: "owner", visible: true },
-    { id: "tuo", name: "TUO – přednášky", color: "#FFAD46", role: "reader", visible: true }
+    { id: "tuo", name: "TUO – přednášky", color: "#FFAD46", role: "reader", visible: true },
+    { id: "work", name: "Firemní", color: "#3F51B5", role: "reader", mirror: true, visible: true }
   ],
   init() {
     const d = sod(new Date()), at = (day, h, m) => { const x = addDays(d, day); x.setHours(h, m, 0, 0); return x; };
@@ -713,7 +748,9 @@ const Demo = {
       ev("doktori", "Zubař", at(0, 11, 15), 45, { loc: "Vinohradská 12" }), ev("ondra@gmail.com", "Oběd s Áďou", at(0, 12, 30), 60, { color: "#E67C73" }),
       ev("ostatni", "Nákup na víkend", at(0, 17, 0), 45), ev("ondra@gmail.com", "Večeře s rodiči", at(0, 18, 30), 90),
       ev("ostatni", "Narozeniny Andrejky", d, 1440, { allDay: true, end: addDays(d, 1) }), ev("ondra@gmail.com", "Volejbal", at(1, 19, 0), 120),
-      ev("tuo", "Pojišťovnictví – cvičení", at(2, 10, 45), 90), ev("ostatni", "Servis auta", at(3, 8, 0), 60), ev("doktori", "Kontrola", at(9, 8, 30), 30)
+      ev("tuo", "Pojišťovnictví – cvičení", at(2, 10, 45), 90),
+      ev("work", "Porada vedení", at(0, 14, 0), 60, { loc: "Zasedačka 2", lock: "Firemní schůzka z Outlooku – změny dělej v Outlooku." }),
+      ev("work", "Call s účetní", at(1, 9, 30), 30, { loc: "Teams", lock: "Firemní schůzka z Outlooku – změny dělej v Outlooku." }), ev("ostatni", "Servis auta", at(3, 8, 0), 60), ev("doktori", "Kontrola", at(9, 8, 30), 30)
     ];
     const tr = (day, h, m, mins, title, project, color) => ({ id: "w" + (++n), title, project, start: at(day, h, m), end: new Date(+at(day, h, m) + mins * 60000), color });
     const wk = -((d.getDay() + 6) % 7);
