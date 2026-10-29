@@ -783,4 +783,17 @@ if (forced === "dark" || forced === "light") { document.documentElement.dataset.
 if (DEMO) { store.set = () => { }; Demo.init(); }
 render();
 if (!DEMO && signedIn()) { if (S.token) refresh(); else { S.needAuth = true; render(); } }
+
+// zkratky z ikony na ploše (dlouhé podržení): ?action=newtask / newevent otevře rovnou formulář
+(function shortcutAction() {
+  const action = new URLSearchParams(location.search).get("action");
+  if (!action || !(DEMO || store.get("everSigned", false))) return;
+  history.replaceState(null, "", location.pathname + (DEMO ? "?demo" : "") + location.hash);   // po zavření formuláře se znovu neotevře
+  let tries = 0;   // úkol potřebuje načtené seznamy – chvíli počkat na data
+  (function open() {
+    if (action === "newtask" && !S.lists.length && ++tries < 40) return setTimeout(open, 150);
+    if (action === "newtask") taskSheet(null);
+    if (action === "newevent") eventSheet(null);
+  })();
+})();
 if ("serviceWorker" in navigator && !DEMO && (location.protocol === "https:" || location.hostname === "localhost")) navigator.serviceWorker.register("sw.js").catch(() => { });
