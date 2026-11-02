@@ -10,8 +10,9 @@ import android.net.Uri
 import android.os.Build
 
 // Připomínky jako budíky systému: zazvoní přesně i se zavřenou appkou a v úsporném režimu.
+// wake = budík jen probudí synchronizaci (ukáže úkoly ráno nebo v jejich čas), sám nic nezobrazí.
 object Reminders {
-    class Item(val key: String, val at: Long, val title: String, val text: String)
+    class Item(val key: String, val at: Long, val title: String, val text: String, val wake: Boolean = false)
 
     fun prefs(ctx: Context): SharedPreferences = ctx.getSharedPreferences("focus", Context.MODE_PRIVATE)
 
@@ -35,15 +36,25 @@ object Reminders {
 
     private fun pending(ctx: Context, key: String, item: Item?, flag: Int): PendingIntent? {
         val i = Intent(ctx, ReminderReceiver::class.java).setData(Uri.parse("focus://reminder/" + Uri.encode(key)))
-        if (item != null) i.putExtra("title", item.title).putExtra("text", item.text)
+        if (item != null) i.putExtra("key", item.key).putExtra("title", item.title).putExtra("text", item.text).putExtra("wake", item.wake)
         return PendingIntent.getBroadcast(ctx, 0, i, flag or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    fun markShown(ctx: Context, key: String) {
+        val p = prefs(ctx)
+        val s = (p.getStringSet("shown", emptySet()) ?: emptySet()).toMutableSet()
+        s.add(key)
+        p.edit().putStringSet("shown", s).apply()
     }
 }
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
+        if (intent.getBooleanExtra("wake", false)) { Sync.now(ctx); return }
         val title = intent.getStringExtra("title") ?: return
-        Notify.show(ctx, title, intent.getStringExtra("text") ?: "", (intent.data?.toString() ?: title).hashCode())
+        val key = intent.getStringExtra("key") ?: title
+        Reminders.markShown(ctx, key)
+        Notify.show(ctx, title, intent.getStringExtra("text") ?: "", key.hashCode())
     }
 }
 

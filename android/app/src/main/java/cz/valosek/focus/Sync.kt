@@ -56,7 +56,7 @@ object Sync {
     }
 
     // Token bez okna – když by Google chtěl souhlas, vrátí null (souhlas se dá jen v appce).
-    private fun token(ctx: Context): String? {
+    fun token(ctx: Context): String? {
         val req = AuthorizationRequest.Builder().setRequestedScopes(MainActivity.SCOPES.map { Scope(it) }).build()
         val r = Tasks.await(Identity.getAuthorizationClient(ctx).authorize(req), 30, TimeUnit.SECONDS)
         return if (r.hasResolution()) null else r.accessToken
@@ -74,15 +74,35 @@ object Sync {
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
+    // Splnění úkolu z oznámení (tlačítko Hotovo). HttpURLConnection neumí PATCH – Google bere POST s přepisem metody.
+    fun completeTask(ctx: Context, listId: String, taskId: String) {
+        val token = token(ctx) ?: throw RuntimeException("Přihlášení vypršelo")
+        val c = URL("$TASKS/lists/${enc(listId)}/tasks/${enc(taskId)}").openConnection() as HttpURLConnection
+        c.requestMethod = "POST"
+        c.setRequestProperty("X-HTTP-Method-Override", "PATCH")
+        c.setRequestProperty("Authorization", "Bearer $token")
+        c.setRequestProperty("Content-Type", "application/json")
+        c.connectTimeout = 20000; c.readTimeout = 20000; c.doOutput = true
+        try {
+            c.outputStream.use { it.write("{\"status\":\"completed\"}".toByteArray()) }
+            if (c.responseCode !in 200..299) throw RuntimeException("Google ${c.responseCode}")
+        } finally { c.disconnect() }
+    }
+
     fun run(ctx: Context) {
         val cfg = config(ctx)
         val token = token(ctx) ?: return
+        val p = Reminders.prefs(ctx)
         val items = ArrayList<Reminders.Item>()
         val zone = ZoneId.systemDefault()
         val now = OffsetDateTime.now()
+        val nowMs = System.currentTimeMillis()
 
+        // ----- události: připomínka X min předem; když už je na ni pozdě (a událost ještě nezačala), hned -----
         val eventMin = cfg.optInt("eventMin", 10)
         val cals = cfg.optJSONArray("calendars")
+        val eventKeys = HashSet<String>()
+        val immediate = ArrayList<Reminders.Item>()
         if (eventMin >= 0 && cals != null) {
             val from = now.minusMinutes(eventMin.toLong()).toString()
             val to = now.plusHours(36).toString()
@@ -99,66 +119,69 @@ object Sync {
                     if (start.isEmpty()) continue   // celodenní události bez připomínky
                     if (declined(e)) continue
                     val s = OffsetDateTime.parse(start)
+                    val startMs = s.toInstant().toEpochMilli()
+                    if (startMs <= nowMs) continue   // už běží
                     val end = e.optJSONObject("end")?.optString("dateTime").orEmpty()
-                    val at = s.minusMinutes(eventMin.toLong()).toInstant().toEpochMilli()
+                    val at = startMs - eventMin * 60000L
                     val time = s.atZoneSameInstant(zone).format(HM) +
                         (if (end.isNotEmpty()) "–" + OffsetDateTime.parse(end).atZoneSameInstant(zone).format(HM) else "")
                     val loc = e.optString("location").trim()
-                    val text = (if (eventMin == 0) "Teď začíná" else "Za $eventMin min") + " · " + time + (if (loc.isNotEmpty()) " · $loc" else "")
                     val title = e.optString("summary").ifBlank { "(bez názvu)" }
-                    items.add(Reminders.Item("ev|$calId|${e.optString("id")}|${s.toInstant().toEpochMilli()}|$eventMin", at, title, text))
+                    val key = "ev|$calId|${e.optString("id")}|$startMs|$eventMin"
+                    eventKeys.add(key)
+                    if (at > nowMs) {
+                        val text = (if (eventMin == 0) "Teď začíná" else "Za $eventMin min") + " · " + time + (if (loc.isNotEmpty()) " · $loc" else "")
+                        items.add(Reminders.Item(key, at, title, text))
+                    } else {
+                        val mins = ((startMs - nowMs + 59999) / 60000).toInt()
+                        immediate.add(Reminders.Item(key, nowMs, title, "Za $mins min · " + time + (if (loc.isNotEmpty()) " · $loc" else "")))
+                    }
                 }
             }
         }
+        // „shown“ = připomínky, které už zazněly (budíkem nebo hned) – ať se neopakují
+        val shown = (p.getStringSet("shown", emptySet()) ?: emptySet()).filter { it in eventKeys }.toMutableSet()
+        for (it in immediate) if (shown.add(it.key)) Notify.show(ctx, it.title, it.text, it.key.hashCode())
+        p.edit().putStringSet("shown", shown).apply()
 
-        // nesplněné úkoly s termínem do pozítří (ranní přehled + úkoly s časem)
+        // ----- úkoly: každý dnešní a zpožděný úkol jako oznámení, dokud ho neodklikneš nebo nesplníš -----
         val today = LocalDate.now(zone)
-        val open = ArrayList<Triple<String, LocalDate, JSONObject>>()
+        val taskHour = cfg.optInt("taskHour", 8)
+        val morning = if (taskHour >= 0) today.atTime(taskHour, 0).atZone(zone).toInstant().toEpochMilli() else null
+        val show = ArrayList<TaskNotify.Task>()
         val lists = get(token, "$TASKS/users/@me/lists?maxResults=100").optJSONArray("items")
         if (lists != null) for (i in 0 until lists.length()) {
             val list = lists.getJSONObject(i)
+            val listId = list.optString("id")
             val dueMax = today.plusDays(2).toString() + "T00:00:00.000Z"
             val arr = try {
-                get(token, "$TASKS/lists/${enc(list.optString("id"))}/tasks?showCompleted=false&showHidden=false&maxResults=100&dueMax=${enc(dueMax)}").optJSONArray("items")
+                get(token, "$TASKS/lists/${enc(listId)}/tasks?showCompleted=false&showHidden=false&maxResults=100&dueMax=${enc(dueMax)}").optJSONArray("items")
             } catch (_: Exception) { null } ?: continue
             for (k in 0 until arr.length()) {
                 val t = arr.getJSONObject(k)
-                val due = t.optString("due")
-                if (due.length < 10 || t.optString("title").isBlank() || t.optString("status") == "completed") continue
-                open.add(Triple(list.optString("title"), LocalDate.parse(due.substring(0, 10)), t))
+                val due = t.optString("due"); val title = t.optString("title").trim()
+                if (due.length < 10 || title.isEmpty() || t.optString("status") == "completed") continue
+                val d = LocalDate.parse(due.substring(0, 10))
+                // čas úkolu je v poznámce „⏰ 14:30“ (Google Tasks API čas neumí)
+                val m = TIME_RE.find(t.optString("notes"))
+                val hm = if (m != null && m.groupValues[1].toInt() < 24 && m.groupValues[2].toInt() < 60) "%02d:%02d".format(m.groupValues[1].toInt(), m.groupValues[2].toInt()) else null
+                val timeMs = if (hm != null) d.atTime(m!!.groupValues[1].toInt(), m.groupValues[2].toInt()).atZone(zone).toInstant().toEpochMilli() else null
+                // od kdy úkol ukázat: s časem v ten čas, jinak od rána (nastavení „od kolika“)
+                val from = if (timeMs != null && !d.isBefore(today)) timeMs else if (d.isAfter(today)) null else morning
+                if (from == null) continue
+                if (from <= nowMs) show.add(TaskNotify.Task(listId, t.optString("id"), title, listName = list.optString("title"), due = d, time = hm, overdue = d.isBefore(today)))
+                else items.add(Reminders.Item("wake|$from", from, "", "", wake = true))
             }
         }
-
-        // úkol s časem (v poznámce „⏰ 14:30“ – Google Tasks API čas neumí) připomenout přesně v ten čas
-        for ((listName, d, t) in open) {
-            val m = TIME_RE.find(t.optString("notes")) ?: continue
-            val h = m.groupValues[1].toInt(); val min = m.groupValues[2].toInt()
-            if (h > 23 || min > 59) continue
-            val at = d.atTime(h, min).atZone(zone).toInstant().toEpochMilli()
-            val hm = "%d:%02d".format(h, min)
-            items.add(Reminders.Item("task|${t.optString("id")}|$d|$hm", at, t.optString("title").trim(), "Úkol · $hm · $listName"))
+        // ráno (dnes, pokud ještě nebylo, a zítra) se úkoly ukážou samy
+        if (taskHour >= 0) for (day in listOf(today, today.plusDays(1))) {
+            val at = day.atTime(taskHour, 0).atZone(zone).toInstant().toEpochMilli()
+            if (at > nowMs) items.add(Reminders.Item("wake|$at", at, "", "", wake = true))
         }
+        TaskNotify.sync(ctx, show, today)
 
-        val taskHour = cfg.optInt("taskHour", 8)
-        if (taskHour >= 0) {
-            // ranní přehled: nejbližší taskHour (dnes, nebo zítra, když už je po něm)
-            var day = today
-            var at = day.atTime(taskHour, 0).atZone(zone)
-            if (at.toInstant().toEpochMilli() <= System.currentTimeMillis()) { day = day.plusDays(1); at = day.atTime(taskHour, 0).atZone(zone) }
-            val dueToday = ArrayList<String>(); var overdue = 0
-            for ((_, d, t) in open) {
-                if (d == day) dueToday.add(t.optString("title").trim()) else if (d.isBefore(day)) overdue++
-            }
-            if (dueToday.isNotEmpty() || overdue > 0) {
-                val title = if (dueToday.isEmpty()) "Úkoly po termínu: $overdue"
-                            else "Dnes " + dueToday.size + " " + plural(dueToday.size) + (if (overdue > 0) " · $overdue po termínu" else "")
-                val text = if (dueToday.isEmpty()) "Podívej se do Focusu, co dohnat." else dueToday.joinToString(" · ")
-                items.add(Reminders.Item("tasks|$day|$taskHour", at.toInstant().toEpochMilli(), title, text))
-            }
-        }
-
-        Reminders.schedule(ctx, items)
-        Reminders.prefs(ctx).edit().putLong("lastSync", System.currentTimeMillis()).apply()
+        Reminders.schedule(ctx, items.distinctBy { it.key })
+        p.edit().putLong("lastSync", System.currentTimeMillis()).apply()
     }
 
     private fun declined(e: JSONObject): Boolean {

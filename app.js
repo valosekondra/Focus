@@ -276,10 +276,12 @@ function topHtml() {
   const refresh = `<button class="icon-btn${S.loading ? " spin" : ""}" data-act="refresh" aria-label="Obnovit">${icon("refresh")}</button>`;
   const gear = `<button class="icon-btn" data-act="settings" aria-label="Nastavení">${icon("settings")}</button>`;
   if (S.view === "settings") return `<div class="hdr"><button class="icon-btn" data-act="back" aria-label="Zpět">${icon("left")}</button><div class="hdr-title">Nastavení<small>Focus pro telefon</small></div></div>`;
-  if (S.view === "overview") return `<div class="hdr"><div class="hdr-title">Přehled<small>${dayLabel(today)} ${dateLong(today)}</small></div>${refresh}${gear}</div>`;
+  // název záložky je dole v liště – nahoře jen to podstatné (den, počty)
+  if (S.view === "overview") return `<div class="hdr"><div class="hdr-title">${dayLabel(today)}<small>${dateLong(today)}</small></div>${refresh}${gear}</div>`;
+  if (S.view === "health") return `<div class="hdr"><div class="hdr-title">${dayLabel(today)}<small>${dateLong(today)} · Pixel Watch 3</small></div>${gear}</div>`;
   if (S.view === "tasks") {
-    const open = S.tasks.filter(t => !t.done).length;
-    return `<div class="hdr"><div class="hdr-title">Úkoly<small>${open} ${plural(open, "otevřený", "otevřené", "otevřených")}</small></div>${refresh}${gear}</div>`;
+    const open = S.tasks.filter(t => !t.done).length, dueToday = tasksDue(today, true).length;
+    return `<div class="hdr"><div class="hdr-title">${open} ${plural(open, "otevřený", "otevřené", "otevřených")}<small>${dueToday ? dueToday + " na dnes" : "na dnes nic"}</small></div>${refresh}${gear}</div>`;
   }
   // kalendář
   const m = S.calMode, d = S.day;
@@ -310,11 +312,11 @@ function render() {
   const v = $("#view");
   if (!signedIn()) { $("#fab").hidden = true; $("#tabs").hidden = true; v.innerHTML = signinHtml(); return; }
   $("#tabs").hidden = false;
-  $("#fab").hidden = S.view === "settings" || S.view === "overview";
+  $("#fab").hidden = S.view === "settings" || S.view === "overview" || S.view === "health";
   let html = "";
   if (S.needAuth) html += `<div class="banner">Přihlášení ke Googlu vypršelo.<button data-act="reauth">Obnovit</button></div>`;
   if (S.error) html += `<div class="banner">${esc(S.error)}<button data-act="refresh">Zkusit znovu</button></div>`;
-  html += S.view === "overview" ? overviewHtml() : S.view === "tasks" ? tasksHtml() : S.view === "calendar" ? calendarHtml() : settingsHtml();
+  html += S.view === "overview" ? overviewHtml() : S.view === "tasks" ? tasksHtml() : S.view === "calendar" ? calendarHtml() : S.view === "health" ? healthHtml() : settingsHtml();
   v.innerHTML = html;
   if (S.view === "calendar" && S.calMode === "day" && !render.scrolled && sameDay(S.day, new Date())) {
     render.scrolled = true;
@@ -374,6 +376,42 @@ function overviewHtml() {
   } else {
     html += `<div class="card"><div class="empty">Odpracovaný čas se tu ukáže, až ho Focus na PC začne zapisovat do Google kalendáře „${TRACKED_NAME}“ (Nastavení → Google kalendář → Povolit nová oprávnění).</div></div>`;
   }
+  return html;
+}
+
+// ----- Zdraví (zatím kostra) -----
+// Data přijdou z hodinek Pixel Watch 3 přes appku Fitbit → Health Connect → Android appku Focus.
+// Než bude napojení, ukazuje se jen rozvržení (v ukázkovém režimu s vymyšlenými čísly).
+function healthHtml() {
+  const H = DEMO ? { sleepMin: 442, sleepScore: 81, steps: 6840, rhr: 58, azm: 34, kcal: 2190,
+    weekSteps: [9120, 7340, 11200, 6020, 8450, 9900, 5200].map((n, i) => i < (new Date().getDay() + 6) % 7 ? n : i === (new Date().getDay() + 6) % 7 ? 6840 : 0),
+    weekSleep: [431, 398, 465, 412, 442, 470, 455].map((n, i) => i <= (new Date().getDay() + 6) % 7 ? n : 0), workouts: [{ name: "Běh", min: 32, at: "7:10" }] } : S.health || null;
+  const v = (x, f) => H && x != null ? f(x) : "–";
+  const hmin = m => Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0");
+  let html = H ? "" : `<div class="banner">Napojení na hodinky připravujeme. Zatím je tu jen rozvržení záložky.</div>`;
+  const goal = 10000, stepsPct = H && H.steps ? Math.min(100, Math.round(H.steps / goal * 100)) : 0;
+  html += `<div class="card"><div class="stats">
+      <div class="stat"><span>Spánek</span><b>${v(H && H.sleepMin, hmin)}</b><small>${H && H.sleepScore ? "skóre " + H.sleepScore : "h v noci"}</small></div>
+      <div class="stat"><span>Kroky</span><b>${v(H && H.steps, n => n.toLocaleString("cs-CZ"))}</b><small>z ${goal.toLocaleString("cs-CZ")}</small></div>
+      <div class="stat"><span>Klidový tep</span><b>${v(H && H.rhr, n => n)}</b><small>tepů/min</small></div></div>
+    <div style="padding:0 14px 14px"><div class="proj-track"><div style="width:${Math.max(2, stepsPct)}%;background:var(--blue)"></div></div></div></div>`;
+  html += `<div class="card"><div class="card-head"><span class="card-title">Aktivita dnes</span></div><div class="stats" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+      <div class="stat"><span>Aktivní minuty</span><b>${v(H && H.azm, n => n)}</b><small>Active Zone Minutes</small></div>
+      <div class="stat"><span>Spálené kalorie</span><b>${v(H && H.kcal, n => n.toLocaleString("cs-CZ"))}</b><small>kcal</small></div></div>`;
+  const w = (H && H.workouts) || [];
+  html += w.length ? w.map(x => `<div class="row"><div class="grow">${esc(x.name)}<div class="sub">${x.at} · ${x.min} min</div></div></div>`).join("") : `<div class="empty">Žádné cvičení.</div>`;
+  html += `</div>`;
+  const week = (title, vals, fmt, max) => {
+    const today = sod(new Date()), w0 = monday(today);
+    let h = `<div class="card"><div class="card-head"><span class="card-title">${title}</span></div><div class="bars">`;
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(w0, i), x = vals ? vals[i] || 0 : 0;
+      h += `<div class="bar-col${sameDay(d, today) ? " today" : ""}"><em>${x ? fmt(x) : ""}</em><div class="bar-track"><div class="bar" style="height:${Math.round(x / max * 100)}%"></div></div><span>${SHORT[d.getDay()]}</span><small></small></div>`;
+    }
+    return h + `</div></div>`;
+  };
+  html += week("Kroky tento týden", H && H.weekSteps, n => (n / 1000).toFixed(1).replace(".", ",") + "k", 14000);
+  html += week("Spánek tento týden", H && H.weekSleep, hmin, 600);
   return html;
 }
 
@@ -549,7 +587,7 @@ function settingsHtml() {
     if (!NATIVE.notificationsAllowed()) html += `<div class="banner">Oznámení jsou v telefonu vypnutá – povol je v Nastavení Androidu → Aplikace → Focus.</div>`;
     html += `<p class="muted" style="font-size:12px;margin:0;padding:2px 6px 6px">Události · kolik předem</p><div class="chips" style="padding:0 4px">`;
     [[-1, "Vypnuto"], [0, "Při začátku"], [5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"], [60, "1 h"]].forEach(([k, n]) => { html += `<button class="chip${c.eventMin === k ? " on" : ""}" data-act="remind" data-k="eventMin" data-id="${k}">${n}</button>`; });
-    html += `</div><p class="muted" style="font-size:12px;margin:0;padding:12px 6px 6px">Úkoly · ranní přehled na dnešek</p><div class="chips" style="padding:0 4px">`;
+    html += `</div><p class="muted" style="font-size:12px;margin:0;padding:12px 6px 6px">Úkoly · od kolika ukazovat dnešní úkoly v oznámeních</p><div class="chips" style="padding:0 4px">`;
     [[-1, "Vypnuto"], [6, "6:00"], [7, "7:00"], [8, "8:00"], [9, "9:00"]].forEach(([k, n]) => { html += `<button class="chip${c.taskHour === k ? " on" : ""}" data-act="remind" data-k="taskHour" data-id="${k}">${n}</button>`; });
     html += `</div><div class="card" style="margin-top:10px"><div class="row"><div class="grow">Zkušební oznámení<div class="sub">Android appka ${esc(NATIVE.version())}${last ? " · připomínky aktualizovány v " + hm(new Date(last)) : ""}</div></div>
     <button class="btn secondary" data-act="testnotify" style="height:36px;padding:0 12px;font-size:13px">Vyzkoušet</button></div></div><div>`;
@@ -850,7 +888,7 @@ const Demo = {
 // ---------- start ----------
 // přímý odkaz na obrazovku (#overview, #tasks, #calendar, #week, #month) a vynucený vzhled (?theme=dark)
 const startView = location.hash.slice(1);
-if (["overview", "tasks", "calendar", "settings"].includes(startView)) S.view = startView;
+if (["overview", "tasks", "calendar", "health", "settings"].includes(startView)) S.view = startView;
 if (["week", "month", "day"].includes(startView)) { S.view = "calendar"; S.calMode = startView; }
 render.scrolled = !(S.view === "calendar" && S.calMode === "day");
 applyTheme();
