@@ -10,8 +10,8 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-192.png">
   <!-- ?v= = verze: po nahrání nové verze zvýšit, aby se nikdy nesmíchaly staré a nové soubory -->
-  <link rel="stylesheet" href="style.css?v=12">
-  <script src="config.js?v=12"></script>
+  <link rel="stylesheet" href="style.css?v=13">
+  <script src="config.js?v=13"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -30,19 +30,21 @@
     </defs>
   </svg>
   <div id="app">
-    <header class="top" id="top"></header>
+    <div class="ptr" id="ptr"><svg><use href="#i-refresh"/></svg></div>
     <main id="view"></main>
     <button class="fab" id="fab" aria-label="Přidat"><svg><use href="#i-plus"/></svg></button>
+    <div class="calbar" id="calbar" hidden></div>
     <nav class="tabs" id="tabs">
+      <button data-view="health"><svg><use href="#i-health"/></svg>Zdraví</button>
       <button data-view="overview" class="on"><svg><use href="#i-overview"/></svg>Přehled</button>
       <button data-view="tasks"><svg><use href="#i-tasks"/></svg>Úkoly</button>
       <button data-view="calendar"><svg><use href="#i-week"/></svg>Kalendář</button>
-      <button data-view="health"><svg><use href="#i-health"/></svg>Zdraví</button>
+      <button data-view="settings" class="tab-icon" aria-label="Nastavení"><svg><use href="#i-settings"/></svg></button>
     </nav>
   </div>
   <div id="sheet-backdrop" class="backdrop"></div>
   <div id="sheet" class="sheet" role="dialog" aria-modal="true"></div>
   <div id="toast" class="toast"></div>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

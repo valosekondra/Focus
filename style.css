@@ -158,6 +158,34 @@ main { padding: 0 12px; }
 .fab svg { width: 24px; height: 24px; }
 .fab[hidden] { display: none; }
 
+/* bez záhlaví: obsah začíná hned pod systémovou lištou */
+main { padding-top: 14px; }
+.tabs .tab-icon { flex: 0 0 52px; justify-content: center; }
+.tabs .tab-icon svg { width: 22px; height: 22px; }
+/* tah dolů = obnovit */
+.ptr { position: fixed; top: calc(env(safe-area-inset-top) + 10px); left: 50%; z-index: 15; width: 38px; height: 38px; border-radius: 19px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--muted); display: grid; place-items: center; transform: translate(-50%, -60px); transition: transform .2s; pointer-events: none; }
+.ptr svg { width: 18px; height: 18px; }
+.ptr.ready { color: var(--text); }
+.ptr.spin { transform: translate(-50%, 0) !important; color: var(--text); }
+.ptr.spin svg { animation: spin .8s linear infinite; }
+/* ovládání kalendáře nad dolní lištou */
+.calbar { position: fixed; left: 12px; right: 12px; max-width: 616px; margin: 0 auto; bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 11; display: flex; align-items: center; gap: 6px; padding: 5px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+.calbar[hidden] { display: none; }
+.calbar .seg { flex: none; }
+.calbar .seg button { padding: 6px 8px 7px; }
+.cal-nav { flex: 1; min-width: 0; display: flex; align-items: center; }
+.cal-nav button { height: 34px; display: grid; place-items: center; color: var(--muted); border-radius: 10px; }
+.cal-nav button:not(.cal-label) { width: 30px; flex: none; }
+.cal-nav svg { width: 16px; height: 16px; }
+.cal-label { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text) !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-label.away { color: var(--blue) !important; }
+.layer-btn { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--muted); border: 1px solid var(--line); }
+.layer-btn svg { width: 16px; height: 16px; }
+.layer-btn.on { color: var(--on-ink); background: var(--ink); border-color: var(--ink); }
+body.cal #app { padding-bottom: calc(132px + env(safe-area-inset-bottom)); }
+body.cal .fab { bottom: calc(134px + env(safe-area-inset-bottom)); }
+main > .strip:first-child { margin: 0 0 10px; }
+
 /* spodní panel (dialog) */
 .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.32); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; }
 .backdrop.open { opacity: 1; pointer-events: auto; }

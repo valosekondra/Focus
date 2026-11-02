@@ -20,6 +20,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
+import androidx.health.connect.client.PermissionController
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
@@ -50,6 +51,29 @@ class MainActivity : ComponentActivity() {
             reply(id, r.accessToken, null)
         } catch (e: Exception) {
             reply(id, null, "Přihlášení se nepovedlo.")
+        }
+    }
+
+    // povolení Health Connect – po návratu stránka znovu načte Zdraví
+    private val healthPermission = registerForActivityResult(PermissionController.createRequestPermissionResultContract()) {
+        web.evaluateJavascript("window.__focusHealthChanged && window.__focusHealthChanged()", null)
+    }
+
+    private fun healthConnect() {
+        when (Health.sdk(this)) {
+            "ok" -> healthPermission.launch(Health.PERMISSIONS)
+            // Health Connect chybí nebo je zastaralý → obchod Play
+            else -> try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.google.android.apps.healthdata")))
+            } catch (_: Exception) { }
+        }
+    }
+
+    private fun healthRead(id: String) {
+        val app = applicationContext
+        thread {
+            val (json, err) = try { Health.read(app).toString() to null } catch (e: Throwable) { null to (e.javaClass.simpleName + ": " + (e.message ?: "")) }
+            runOnUiThread { web.evaluateJavascript("window.__focusHealth && window.__focusHealth(${q(id)}, ${q(json)}, ${q(err)})", null) }
         }
     }
 
@@ -180,6 +204,14 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface fun setConfig(json: String) { runOnUiThread { if (ours()) try { Sync.setConfig(this@MainActivity, json); syncDirect() } catch (_: Exception) { } } }
         @JavascriptInterface fun lastSync(): Long = Reminders.prefs(this@MainActivity).getLong("lastSync", 0)
         @JavascriptInterface fun syncStatus(): String = Sync.status(this@MainActivity)
+        // Zdraví: stav ("ok"/"update"/"unavailable" + počet povolených oprávnění), povolení, načtení dat
+        @JavascriptInterface fun healthStatus(): String {
+            val sdk = Health.sdk(this@MainActivity)
+            val granted = if (sdk == "ok") try { Health.granted(this@MainActivity).intersect(Health.PERMISSIONS).size } catch (_: Exception) { 0 } else 0
+            return JSONObject().put("sdk", sdk).put("granted", granted).put("needed", Health.PERMISSIONS.size).toString()
+        }
+        @JavascriptInterface fun healthConnect() { runOnUiThread { if (ours()) this@MainActivity.healthConnect() } }
+        @JavascriptInterface fun healthRead(id: String) { runOnUiThread { if (ours()) this@MainActivity.healthRead(id) } }
         @JavascriptInterface fun syncNow() { runOnUiThread { if (ours()) syncDirect() } }
         @JavascriptInterface fun notificationsAllowed(): Boolean =
             Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED

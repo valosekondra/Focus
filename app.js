@@ -246,6 +246,7 @@ async function loadTasks() {
 }
 
 async function refresh(full) {
+  if (S.view === "health") loadHealth(true);
   if (!signedIn() || S.loading) return;
   S.loading++; S.error = null; render();
   try {
@@ -271,46 +272,36 @@ function tasksDue(day, includeLate) {
 }
 
 // ---------- vykreslení ----------
-function topHtml() {
-  if (!signedIn()) return "";
-  const today = sod(new Date());
-  const refresh = `<button class="icon-btn${S.loading ? " spin" : ""}" data-act="refresh" aria-label="Obnovit">${icon("refresh")}</button>`;
-  const gear = `<button class="icon-btn" data-act="settings" aria-label="Nastavení">${icon("settings")}</button>`;
-  if (S.view === "settings") return `<div class="hdr"><button class="icon-btn" data-act="back" aria-label="Zpět">${icon("left")}</button><div class="hdr-title">Nastavení<small>Focus pro telefon</small></div></div>`;
-  // název záložky je dole v liště – nahoře jen to podstatné (den, počty)
-  if (S.view === "overview") return `<div class="hdr"><div class="hdr-title">${dayLabel(today)}<small>${dateLong(today)}</small></div>${refresh}${gear}</div>`;
-  if (S.view === "health") return `<div class="hdr"><div class="hdr-title">${dayLabel(today)}<small>${dateLong(today)} · Pixel Watch 3</small></div>${gear}</div>`;
-  if (S.view === "tasks") {
-    const open = S.tasks.filter(t => !t.done).length, dueToday = tasksDue(today, true).length;
-    return `<div class="hdr"><div class="hdr-title">${open} ${plural(open, "otevřený", "otevřené", "otevřených")}<small>${dueToday ? dueToday + " na dnes" : "na dnes nic"}</small></div>${refresh}${gear}</div>`;
-  }
-  // kalendář
-  const m = S.calMode, d = S.day;
-  let title, sub;
-  if (m === "day") { title = dayLabel(d); sub = dateLong(d) + (d.getFullYear() !== today.getFullYear() ? " " + d.getFullYear() : "") + (sameDay(d, today) ? " · dnes" : ""); }
-  else if (m === "week") { const w = monday(d), e = addDays(w, 6); title = sameDay(w, monday(today)) ? "Tento týden" : "Týden"; sub = w.getDate() + ". " + (w.getMonth() + 1) + ". – " + e.getDate() + ". " + (e.getMonth() + 1) + "."; }
-  else { title = MONTHS1[S.month.getMonth()]; sub = String(S.month.getFullYear()); }
+// Bez záhlaví: obnovení = tah dolů, Nastavení = ikona v dolní liště,
+// ovládání kalendáře = lišta nad dolní navigací (calBarHtml), dny týdne = první řádek obsahu.
+function calBarHtml() {
+  const today = sod(new Date()), m = S.calMode, d = S.day;
+  let label;
+  if (m === "day") label = (sameDay(d, today) ? "Dnes" : SHORT[d.getDay()]) + " " + d.getDate() + ". " + (d.getMonth() + 1) + ".";
+  else if (m === "week") { const w = monday(d), e = addDays(w, 6); label = w.getDate() + ". – " + e.getDate() + ". " + (e.getMonth() + 1) + "."; }
+  else label = MONTHS1[S.month.getMonth()] + (S.month.getFullYear() !== today.getFullYear() ? " " + S.month.getFullYear() : "");
   const isCurrent = m === "day" ? sameDay(d, today) : m === "week" ? sameDay(monday(d), monday(today)) : (S.month.getMonth() === today.getMonth() && S.month.getFullYear() === today.getFullYear());
-  let html = `<div class="hdr"><div class="hdr-title">${title}<small>${sub}</small></div>${isCurrent ? "" : `<button class="today-pill" data-act="today">Dnes</button>`}
-      <button class="icon-btn" data-act="prev" aria-label="Předchozí">${icon("left")}</button><button class="icon-btn" data-act="next" aria-label="Další">${icon("right")}</button>${gear}</div>
-    <div class="seg-row"><div class="seg">${[["day", "Den"], ["week", "Týden"], ["month", "Měsíc"]].map(([k, n]) => `<button class="${m === k ? "on" : ""}" data-act="calmode" data-id="${k}">${n}</button>`).join("")}</div>
-    ${S.trackedId ? `<button class="layer${S.showTracked ? " on" : ""}" data-act="layer" style="margin-left:auto">${icon("today")}Naměřeno</button>` : ""}</div>`;
-  if (m === "day") {
-    const w = monday(d);
-    html += `<div class="strip">`;
-    for (let i = 0; i < 7; i++) {
-      const x = addDays(w, i), busy = eventsOn(x).length + tasksDue(x, false).length;
-      html += `<button class="sd${sameDay(x, d) ? " on" : ""}${sameDay(x, today) ? " is-today" : ""}" data-act="pick" data-d="${+x}"><span>${SHORT[x.getDay()]}</span><b>${x.getDate()}</b><i${busy ? "" : ' class="no"'}></i></button>`;
-    }
-    html += `</div>`;
+  return `<div class="seg">${[["day", "Den"], ["week", "Týden"], ["month", "Měsíc"]].map(([k, n]) => `<button class="${m === k ? "on" : ""}" data-act="calmode" data-id="${k}">${n}</button>`).join("")}</div>
+    <div class="cal-nav"><button data-act="prev" aria-label="Předchozí">${icon("left")}</button><button class="cal-label${isCurrent ? "" : " away"}" data-act="today" title="Na dnešek">${label}</button><button data-act="next" aria-label="Další">${icon("right")}</button></div>
+    ${S.trackedId ? `<button class="layer-btn${S.showTracked ? " on" : ""}" data-act="layer" aria-label="Naměřený čas">${icon("today")}</button>` : ""}`;
+}
+function stripHtml() {
+  const today = sod(new Date()), d = S.day, w = monday(d);
+  let html = `<div class="strip">`;
+  for (let i = 0; i < 7; i++) {
+    const x = addDays(w, i), busy = eventsOn(x).length + tasksDue(x, false).length;
+    html += `<button class="sd${sameDay(x, d) ? " on" : ""}${sameDay(x, today) ? " is-today" : ""}" data-act="pick" data-d="${+x}"><span>${SHORT[x.getDay()]}</span><b>${x.getDate()}</b><i${busy ? "" : ' class="no"'}></i></button>`;
   }
-  return html;
+  return html + `</div>`;
 }
 
 function render() {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.view === S.view));
-  const top = $("#top"); if (top) top.innerHTML = topHtml();
-  const v = $("#view");
+  const v = $("#view"), bar = $("#calbar");
+  $("#ptr").classList.toggle("spin", !!S.loading);
+  const cal = signedIn() && S.view === "calendar";
+  document.body.classList.toggle("cal", cal);
+  bar.hidden = !cal; bar.innerHTML = cal ? calBarHtml() : "";
   if (!signedIn()) { $("#fab").hidden = true; $("#tabs").hidden = true; v.innerHTML = signinHtml(); return; }
   $("#tabs").hidden = false;
   $("#fab").hidden = S.view === "settings" || S.view === "overview" || S.view === "health";
@@ -383,13 +374,44 @@ function overviewHtml() {
 // ----- Zdraví (zatím kostra) -----
 // Data přijdou z hodinek Pixel Watch 3 přes appku Fitbit → Health Connect → Android appku Focus.
 // Než bude napojení, ukazuje se jen rozvržení (v ukázkovém režimu s vymyšlenými čísly).
+let healthSeq = 0;
+const healthCalls = {};
+window.__focusHealth = (id, json, err) => {
+  const p = healthCalls[id]; delete healthCalls[id];
+  S.healthLoading = false;
+  if (err) S.healthError = err; else { try { S.health = JSON.parse(json); S.healthAt = Date.now(); S.healthError = null; store.set("health", S.health); } catch (e) { } }
+  if (S.view === "health") render();
+};
+window.__focusHealthChanged = () => loadHealth(true);
+function healthState() { try { return NATIVE && NATIVE.healthStatus ? JSON.parse(NATIVE.healthStatus()) : null; } catch (e) { return null; } }
+function loadHealth(force) {
+  const st = healthState();
+  if (!st || st.sdk !== "ok" || !st.granted || S.healthLoading) return;
+  if (!force && S.healthAt && Date.now() - S.healthAt < 60000) return;
+  S.healthLoading = true; const id = String(++healthSeq); healthCalls[id] = 1;
+  NATIVE.healthRead(id);
+}
+
+function healthSetupHtml(st) {
+  if (!NATIVE) return `<div class="banner">Zdraví z hodinek funguje jen v Android appce Focus.</div>`;
+  if (!st) return `<div class="banner">Aktualizuj Android appku Focus – tahle verze ještě Zdraví neumí.</div>`;
+  if (st.sdk !== "ok") return `<div class="card"><div class="row"><div class="grow">Chybí Health Connect<div class="sub">${st.sdk === "update" ? "Health Connect je potřeba aktualizovat." : "Nainstaluj Health Connect z Obchodu Play."}</div></div>
+    <button class="btn secondary" data-act="healthconnect" style="height:36px;padding:0 12px;font-size:13px">Otevřít</button></div></div>`;
+  if (!st.granted) return `<div class="card"><div class="row"><div class="grow">Propojit s hodinkami<div class="sub">1) V appce Fitbit: profil → Nastavení → Health Connect → zapnout sdílení.<br>2) Tady povol Focusu čtení kroků, spánku, tepu, cvičení a kalorií.</div></div></div>
+    <div style="padding:0 14px 14px"><button class="btn primary" data-act="healthconnect" style="width:100%">Propojit s Health Connect</button></div></div>`;
+  return "";
+}
+
 function healthHtml() {
+  const st = DEMO ? null : healthState();
+  if (!DEMO) loadHealth(false);
   const H = DEMO ? { sleepMin: 442, sleepScore: 81, steps: 6840, rhr: 58, azm: 34, kcal: 2190,
     weekSteps: [9120, 7340, 11200, 6020, 8450, 9900, 5200].map((n, i) => i < (new Date().getDay() + 6) % 7 ? n : i === (new Date().getDay() + 6) % 7 ? 6840 : 0),
-    weekSleep: [431, 398, 465, 412, 442, 470, 455].map((n, i) => i <= (new Date().getDay() + 6) % 7 ? n : 0), workouts: [{ name: "Běh", min: 32, at: "7:10" }] } : S.health || null;
+    weekSleep: [431, 398, 465, 412, 442, 470, 455].map((n, i) => i <= (new Date().getDay() + 6) % 7 ? n : 0), workouts: [{ name: "Běh", min: 32, at: "7:10" }] } : S.health || (S.health = store.get("health", null));
   const v = (x, f) => H && x != null ? f(x) : "–";
   const hmin = m => Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0");
-  let html = H ? "" : `<div class="banner">Napojení na hodinky připravujeme. Zatím je tu jen rozvržení záložky.</div>`;
+  let html = DEMO ? "" : healthSetupHtml(st);
+  if (S.healthError) html += `<div class="banner">Zdraví se nenačetlo: ${esc(S.healthError)}</div>`;
   const goal = 10000, stepsPct = H && H.steps ? Math.min(100, Math.round(H.steps / goal * 100)) : 0;
   html += `<div class="card"><div class="stats">
       <div class="stat"><span>Spánek</span><b>${v(H && H.sleepMin, hmin)}</b><small>${H && H.sleepScore ? "skóre " + H.sleepScore : "h v noci"}</small></div>
@@ -397,7 +419,7 @@ function healthHtml() {
       <div class="stat"><span>Klidový tep</span><b>${v(H && H.rhr, n => n)}</b><small>tepů/min</small></div></div>
     <div style="padding:0 14px 14px"><div class="proj-track"><div style="width:${Math.max(2, stepsPct)}%;background:var(--blue)"></div></div></div></div>`;
   html += `<div class="card"><div class="card-head"><span class="card-title">Aktivita dnes</span></div><div class="stats" style="grid-template-columns:repeat(2,minmax(0,1fr))">
-      <div class="stat"><span>Aktivní minuty</span><b>${v(H && H.azm, n => n)}</b><small>Active Zone Minutes</small></div>
+      <div class="stat"><span>Cvičení</span><b>${v(H && H.azm, n => n)}</b><small>min dnes</small></div>
       <div class="stat"><span>Spálené kalorie</span><b>${v(H && H.kcal, n => n.toLocaleString("cs-CZ"))}</b><small>kcal</small></div></div>`;
   const w = (H && H.workouts) || [];
   html += w.length ? w.map(x => `<div class="row"><div class="grow">${esc(x.name)}<div class="sub">${x.at} · ${x.min} min</div></div></div>`).join("") : `<div class="empty">Žádné cvičení.</div>`;
@@ -454,9 +476,14 @@ function tasksHtml() {
   const open = S.tasks.filter(t => !t.done && inList(t)).sort((a, b) => dueAt(a) - dueAt(b) || a.title.localeCompare(b.title, "cs"));
   const done = S.tasks.filter(t => t.done && inList(t)).sort((a, b) => (b.completed || 0) - (a.completed || 0));
   const showList = f === "all" && S.lists.length > 1;
-  let html = `<div class="lists"><button class="pill${f === "all" ? " on" : ""}" data-act="list" data-id="all">Vše<span class="n">${S.tasks.filter(t => !t.done).length}</span></button>`;
-  S.lists.forEach(l => { html += `<button class="pill${f === l.id ? " on" : ""}" data-act="list" data-id="${esc(l.id)}">${esc(l.name)}<span class="n">${S.tasks.filter(t => !t.done && t.listId === l.id).length}</span></button>`; });
-  html += `</div><form class="add-row" data-act="quickadd"><span>+</span><input id="quick" placeholder="Přidat úkol${f !== "all" ? " do " + esc((S.lists.find(l => l.id === f) || {}).name || "") : ""}…" autocomplete="off" enterkeyhint="done"></form>`;
+  // filtr seznamů jen když má smysl (aspoň dva seznamy s otevřenými úkoly); přidávání přes tlačítko +
+  let html = "";
+  const usedLists = S.lists.filter(l => S.tasks.some(t => !t.done && t.listId === l.id));
+  if (usedLists.length > 1 || f !== "all") {
+    html += `<div class="lists"><button class="pill${f === "all" ? " on" : ""}" data-act="list" data-id="all">Vše<span class="n">${S.tasks.filter(t => !t.done).length}</span></button>`;
+    usedLists.forEach(l => { html += `<button class="pill${f === l.id ? " on" : ""}" data-act="list" data-id="${esc(l.id)}">${esc(l.name)}<span class="n">${S.tasks.filter(t => !t.done && t.listId === l.id).length}</span></button>`; });
+    html += `</div>`;
+  }
   // otevřené po skupinách: po termínu, dnes, nadcházející, bez termínu
   const today = sod(new Date()), groups = [["Po termínu", t => t.due && t.due < today], ["Dnes", t => t.due && sameDay(t.due, today)], ["Nadcházející", t => t.due && t.due > today], ["Bez termínu", t => !t.due]];
   let any = false;
@@ -477,7 +504,7 @@ function dayHtml() {
   const d = S.day, isToday = sameDay(d, new Date());
   const evs = eventsOn(d), allDay = evs.filter(e => e.allDay), timed = evs.filter(e => !e.allDay);
   const tr = S.showTracked && S.trackedId ? trackedOn(d) : null;
-  let html = `<div class="card">`;
+  let html = stripHtml() + `<div class="card">`;
   if (allDay.length) html += `<div class="allday" style="padding-top:12px">${allDay.map(e => `<span class="chip-ev" style="--ev:${e.color};--ev-bg:${tint(e.color, .82)}" data-ev="${esc(e.calId)}|${esc(e.id)}">${esc(e.title)}</span>`).join("")}</div>`;
   if (tr) html += `<div class="lanes"><span>Kalendář</span><span>Naměřeno${tr.length ? " · " + dur(workedMs(d)) : ""}</span></div>`;
   const due = tasksDue(d, isToday);
@@ -791,6 +818,7 @@ document.addEventListener("click", async e => {
       render(); return refresh();
     }
     if (act === "caltarget") { store.set("calTarget", id); return render(); }
+    if (act === "healthconnect") { NATIVE.healthConnect(); return; }
     if (act === "syncnow") { NATIVE.syncNow(); toast("Synchronizuji…"); return; }
     if (act === "remind") { pushNative({ [a.dataset.k]: +id }); return render(); }
     if (act === "testnotify") { NATIVE.testNotification("Focus", "Oznámení fungují 👍"); return; }
@@ -832,6 +860,24 @@ $("#view").addEventListener("touchend", e => {
   touch = null;
   if (!fast || Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return;
   shift(dx < 0 ? 1 : -1);
+}, { passive: true });
+
+// tah dolů na začátku stránky = obnovit data (náhrada tlačítka ze záhlaví)
+let pull = null;
+document.addEventListener("touchstart", e => {
+  pull = window.scrollY <= 0 && e.touches.length === 1 && signedIn() && !$("#sheet").classList.contains("open") ? { y: e.touches[0].clientY, d: 0 } : null;
+}, { passive: true });
+document.addEventListener("touchmove", e => {
+  if (!pull) return;
+  pull.d = e.touches[0].clientY - pull.y;
+  const p = $("#ptr"); p.style.transform = `translate(-50%, ${Math.min(64, Math.max(0, pull.d) * 0.45) - 56}px) rotate(${pull.d * 2}deg)`;
+  p.classList.toggle("ready", pull.d > 110);
+}, { passive: true });
+document.addEventListener("touchend", () => {
+  if (!pull) return;
+  const go = pull.d > 110; pull = null;
+  const p = $("#ptr"); p.style.transform = ""; p.classList.remove("ready");
+  if (go) refresh(true);
 }, { passive: true });
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - S.loadedAt > 5 * 60000) refresh(); });
