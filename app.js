@@ -96,7 +96,29 @@ function initAuth() {
   });
   return true;
 }
+// Android appka (obal kolem této stránky): přihlášení přes Google účet v telefonu, token se obnovuje sám.
+const NATIVE = !DEMO && window.FocusAndroid ? window.FocusAndroid : null;
+const nativeCalls = {};
+window.__focusNative = (id, token, err) => {
+  const p = nativeCalls[id]; delete nativeCalls[id]; if (!p) return;
+  if (err || !token) p.reject(new Error(err === "consent" ? "consent" : err || "Přihlášení se nepovedlo.")); else p.resolve(token);
+};
+function nativeSignIn(interactive) {
+  return new Promise((resolve, reject) => {
+    const id = Date.now() + "-" + Math.random().toString(36).slice(2);
+    nativeCalls[id] = { resolve, reject };
+    NATIVE.getToken(!!interactive, id);
+  }).then(t => {
+    S.token = t; S.tokenExp = Date.now() + 50 * 60000;   // Google token platí hodinu
+    store.set("token", { t: S.token, e: S.tokenExp }); S.needAuth = false;
+    return t;
+  });
+}
+let nativeRenewing = null;
+function nativeRenew() { return nativeRenewing || (nativeRenewing = nativeSignIn(false).finally(() => { nativeRenewing = null; })); }
+
 function signIn(consent) {
+  if (NATIVE) return nativeSignIn(true);
   return new Promise((resolve, reject) => {
     if (!initAuth()) { reject(new Error("Google přihlášení se ještě načítá, zkus to za chvilku.")); return; }
     pendingAuth = { resolve, reject };
@@ -106,10 +128,12 @@ function signIn(consent) {
 (function restoreToken() { const t = store.get("token", null); if (t && t.e > Date.now()) { S.token = t.t; S.tokenExp = t.e; } })();
 const signedIn = () => DEMO || (store.get("everSigned", false) && (S.token || S.calendars.length));
 
-async function api(method, url, body) {
+async function api(method, url, body, retried) {
   if (DEMO) return Demo.api(method, url, body);
+  if (NATIVE && (!S.token || Date.now() > S.tokenExp)) { try { await nativeRenew(); } catch (e) { } }
   if (!S.token || Date.now() > S.tokenExp) { S.needAuth = true; render(); throw new Error("auth"); }
   const r = await fetch(url, { method, headers: Object.assign({ Authorization: "Bearer " + S.token }, body ? { "Content-Type": "application/json" } : {}), body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401 && NATIVE && !retried) { S.token = null; return api(method, url, body, true); }
   if (r.status === 401) { S.token = null; S.needAuth = true; render(); throw new Error("auth"); }
   if (r.status === 204) return {};
   const j = await r.json().catch(() => ({}));
@@ -499,6 +523,8 @@ function settingsHtml() {
   writableCals().forEach(c => { html += `<button class="chip${c.id === target ? " on" : ""}" data-act="caltarget" data-id="${esc(c.id)}"><span class="cdot" style="background:${c.color}"></span>${esc(c.name)}</button>`; });
   html += `</div><div class="caption">Vzhled</div><div class="chips" style="padding:0 4px">`;
   [["auto", "Podle telefonu"], ["light", "Světlý"], ["dark", "Tmavý"]].forEach(([k, n]) => { html += `<button class="chip${theme === k ? " on" : ""}" data-act="theme" data-id="${k}">${n}</button>`; });
+  if (NATIVE) html += `</div><div class="caption">Oznámení</div><div class="card"><div class="row"><div class="grow">Zkušební oznámení<div class="sub">Android appka ${esc(NATIVE.version())}</div></div>
+    <button class="btn secondary" data-act="testnotify" style="height:36px;padding:0 12px;font-size:13px">Vyzkoušet</button></div></div><div>`;
   html += `</div><p class="muted" style="font-size:12px;padding:8px 6px">Focus pro telefon · kalendář a úkoly z Googlu. Na PC je stejné v desktopovém Focusu.</p>`;
   return html;
 }
@@ -673,6 +699,7 @@ document.addEventListener("click", async e => {
       render(); return refresh();
     }
     if (act === "caltarget") { store.set("calTarget", id); return render(); }
+    if (act === "testnotify") { NATIVE.testNotification("Focus", "Oznámení fungují 👍"); return; }
     if (act === "theme") { store.set("theme", id); applyTheme(); return render(); }
     if (act === "signout") {
       if (!DEMO && window.google && S.token) google.accounts.oauth2.revoke(S.token, () => { });
@@ -726,6 +753,7 @@ function syncBars() {
   const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#111113";
   const m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute("content", bg);
   document.documentElement.style.background = bg;
+  if (NATIVE && NATIVE.setBars) NATIVE.setBars(bg);
 }
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { syncBars(); render(); });
 
@@ -782,7 +810,7 @@ const forced = new URLSearchParams(location.search).get("theme");
 if (forced === "dark" || forced === "light") { document.documentElement.dataset.theme = forced; syncBars(); }
 if (DEMO) { store.set = () => { }; Demo.init(); }
 render();
-if (!DEMO && signedIn()) { if (S.token) refresh(); else { S.needAuth = true; render(); } }
+if (!DEMO && signedIn()) { if (S.token || NATIVE) refresh(); else { S.needAuth = true; render(); } }
 
 // zkratky z ikony na ploše (dlouhé podržení): ?action=newtask / newevent otevře rovnou formulář
 (function shortcutAction() {
