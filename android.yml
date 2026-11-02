@@ -1,0 +1,54 @@
+# Sestaví Android appku Focus (složka android/) a vydá ji jako focus.apk v sekci Releases.
+# Spustí se sama po nahrání změn ve složce android/, nebo ručně (Actions → Android APK → Run workflow).
+name: Android APK
+
+on:
+  push:
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 0.1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Podpisový klíč
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE }}
+          KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ]; then echo "::error::Chybí tajná proměnná ANDROID_KEYSTORE (Settings → Secrets and variables → Actions)"; exit 1; fi
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/focus.p12"
+          alias=$(keytool -list -keystore "$RUNNER_TEMP/focus.p12" -storetype pkcs12 -storepass "$KS_PASSWORD" | grep -i PrivateKeyEntry | head -1 | cut -d, -f1)
+          echo "KS_ALIAS=$alias" >> "$GITHUB_ENV"
+          echo "KS_FILE=$RUNNER_TEMP/focus.p12" >> "$GITHUB_ENV"
+          keytool -list -v -keystore "$RUNNER_TEMP/focus.p12" -storetype pkcs12 -storepass "$KS_PASSWORD" | grep -i "SHA1:"
+
+      - name: Sestavení
+        working-directory: android
+        env:
+          KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Vydání
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk focus.apk
+          gh release create "v$VERSION_NAME" focus.apk --title "Focus $VERSION_NAME" --notes "Android appka Focus $VERSION_NAME" --latest
