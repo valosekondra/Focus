@@ -76,6 +76,20 @@ class MainActivity : ComponentActivity() {
             override fun handleOnBackPressed() { if (web.canGoBack()) web.goBack() else finish() }
         })
         if (savedInstanceState != null) web.restoreState(savedInstanceState) else web.loadUrl(URL)
+
+        Sync.periodic(this)
+        // o povolení oznámení požádat jednou hned po prvním spuštění
+        val p = Reminders.prefs(this)
+        if (Build.VERSION.SDK_INT >= 33 && !p.getBoolean("askedNotify", false) &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            p.edit().putBoolean("askedNotify", true).apply()
+            notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Sync.now(this)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -136,6 +150,11 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface fun getToken(interactive: Boolean, id: String) { runOnUiThread { authorize(interactive, id) } }
         @JavascriptInterface fun testNotification(title: String, text: String) { runOnUiThread { if (ours()) notifyNow(title, text) } }
         @JavascriptInterface fun setBars(color: String) { runOnUiThread { this@MainActivity.setBars(color) } }
+        @JavascriptInterface fun getConfig(): String = Sync.config(this@MainActivity).toString()
+        @JavascriptInterface fun setConfig(json: String) { runOnUiThread { if (ours()) try { Sync.setConfig(this@MainActivity, json) } catch (_: Exception) { } } }
+        @JavascriptInterface fun lastSync(): Long = Reminders.prefs(this@MainActivity).getLong("lastSync", 0)
+        @JavascriptInterface fun notificationsAllowed(): Boolean =
+            Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         @JavascriptInterface fun openExternal(url: String) {
             runOnUiThread { try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) { } }
         }

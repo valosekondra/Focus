@@ -114,6 +114,17 @@ function nativeSignIn(interactive) {
     return t;
   });
 }
+// Nastavení připomínek žije v Android appce (ta je plánuje i se zavřenou stránkou); kalendáře posíláme stejné jako zobrazené.
+function nativeCfg() {
+  let c = {}; try { c = JSON.parse(NATIVE.getConfig() || "{}"); } catch (e) { }
+  return Object.assign({ eventMin: 10, taskHour: 8 }, c);
+}
+function pushNative(patch) {
+  if (!NATIVE || !NATIVE.setConfig || !S.calendars.length) return;
+  const c = Object.assign(nativeCfg(), patch || {});
+  c.calendars = selectedCals().map(x => x.id);
+  NATIVE.setConfig(JSON.stringify(c));
+}
 let nativeRenewing = null;
 function nativeRenew() { return nativeRenewing || (nativeRenewing = nativeSignIn(false).finally(() => { nativeRenewing = null; })); }
 
@@ -240,6 +251,7 @@ async function refresh(full) {
     if (full || !S.calendars.length) await loadCalendars();
     await Promise.all([loadEvents(), loadTasks()]);
     S.loadedAt = Date.now();
+    pushNative();
   } catch (e) { if (e.message !== "auth") S.error = e.message; }
   S.loading--; render();
 }
@@ -523,7 +535,17 @@ function settingsHtml() {
   writableCals().forEach(c => { html += `<button class="chip${c.id === target ? " on" : ""}" data-act="caltarget" data-id="${esc(c.id)}"><span class="cdot" style="background:${c.color}"></span>${esc(c.name)}</button>`; });
   html += `</div><div class="caption">Vzhled</div><div class="chips" style="padding:0 4px">`;
   [["auto", "Podle telefonu"], ["light", "Světlý"], ["dark", "Tmavý"]].forEach(([k, n]) => { html += `<button class="chip${theme === k ? " on" : ""}" data-act="theme" data-id="${k}">${n}</button>`; });
-  if (NATIVE) html += `</div><div class="caption">Oznámení</div><div class="card"><div class="row"><div class="grow">Zkušební oznámení<div class="sub">Android appka ${esc(NATIVE.version())}</div></div>
+  if (NATIVE && NATIVE.setConfig) {
+    const c = nativeCfg(), last = NATIVE.lastSync();
+    html += `</div><div class="caption">Připomínky</div>`;
+    if (!NATIVE.notificationsAllowed()) html += `<div class="banner">Oznámení jsou v telefonu vypnutá – povol je v Nastavení Androidu → Aplikace → Focus.</div>`;
+    html += `<p class="muted" style="font-size:12px;margin:0;padding:2px 6px 6px">Události · kolik předem</p><div class="chips" style="padding:0 4px">`;
+    [[-1, "Vypnuto"], [0, "Při začátku"], [5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"], [60, "1 h"]].forEach(([k, n]) => { html += `<button class="chip${c.eventMin === k ? " on" : ""}" data-act="remind" data-k="eventMin" data-id="${k}">${n}</button>`; });
+    html += `</div><p class="muted" style="font-size:12px;margin:0;padding:12px 6px 6px">Úkoly · ranní přehled na dnešek</p><div class="chips" style="padding:0 4px">`;
+    [[-1, "Vypnuto"], [6, "6:00"], [7, "7:00"], [8, "8:00"], [9, "9:00"]].forEach(([k, n]) => { html += `<button class="chip${c.taskHour === k ? " on" : ""}" data-act="remind" data-k="taskHour" data-id="${k}">${n}</button>`; });
+    html += `</div><div class="card" style="margin-top:10px"><div class="row"><div class="grow">Zkušební oznámení<div class="sub">Android appka ${esc(NATIVE.version())}${last ? " · připomínky aktualizovány v " + hm(new Date(last)) : ""}</div></div>
+    <button class="btn secondary" data-act="testnotify" style="height:36px;padding:0 12px;font-size:13px">Vyzkoušet</button></div></div><div>`;
+  } else if (NATIVE) html += `</div><div class="caption">Oznámení</div><div class="card"><div class="row"><div class="grow">Zkušební oznámení<div class="sub">Android appka ${esc(NATIVE.version())}</div></div>
     <button class="btn secondary" data-act="testnotify" style="height:36px;padding:0 12px;font-size:13px">Vyzkoušet</button></div></div><div>`;
   html += `</div><p class="muted" style="font-size:12px;padding:8px 6px">Focus pro telefon · kalendář a úkoly z Googlu. Na PC je stejné v desktopovém Focusu.</p>`;
   return html;
@@ -699,6 +721,7 @@ document.addEventListener("click", async e => {
       render(); return refresh();
     }
     if (act === "caltarget") { store.set("calTarget", id); return render(); }
+    if (act === "remind") { pushNative({ [a.dataset.k]: +id }); return render(); }
     if (act === "testnotify") { NATIVE.testNotification("Focus", "Oznámení fungují 👍"); return; }
     if (act === "theme") { store.set("theme", id); applyTheme(); return render(); }
     if (act === "signout") {
