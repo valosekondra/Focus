@@ -30,6 +30,7 @@ object Sync {
     private const val CAL = "https://www.googleapis.com/calendar/v3"
     private const val TASKS = "https://tasks.googleapis.com/tasks/v1"
     private val HM = DateTimeFormatter.ofPattern("H:mm")
+    private val TIME_RE = Regex("⏰\\s*(\\d{1,2}):(\\d{2})\\s*$")
 
     // Nastavení z telefonní appky: {calendars:[id…], eventMin: 10 (-1 = vypnuto), taskHour: 8 (-1 = vypnuto)}
     fun config(ctx: Context): JSONObject =
@@ -110,27 +111,43 @@ object Sync {
             }
         }
 
+        // nesplněné úkoly s termínem do pozítří (ranní přehled + úkoly s časem)
+        val today = LocalDate.now(zone)
+        val open = ArrayList<Triple<String, LocalDate, JSONObject>>()
+        val lists = get(token, "$TASKS/users/@me/lists?maxResults=100").optJSONArray("items")
+        if (lists != null) for (i in 0 until lists.length()) {
+            val list = lists.getJSONObject(i)
+            val dueMax = today.plusDays(2).toString() + "T00:00:00.000Z"
+            val arr = try {
+                get(token, "$TASKS/lists/${enc(list.optString("id"))}/tasks?showCompleted=false&showHidden=false&maxResults=100&dueMax=${enc(dueMax)}").optJSONArray("items")
+            } catch (_: Exception) { null } ?: continue
+            for (k in 0 until arr.length()) {
+                val t = arr.getJSONObject(k)
+                val due = t.optString("due")
+                if (due.length < 10 || t.optString("title").isBlank() || t.optString("status") == "completed") continue
+                open.add(Triple(list.optString("title"), LocalDate.parse(due.substring(0, 10)), t))
+            }
+        }
+
+        // úkol s časem (v poznámce „⏰ 14:30“ – Google Tasks API čas neumí) připomenout přesně v ten čas
+        for ((listName, d, t) in open) {
+            val m = TIME_RE.find(t.optString("notes")) ?: continue
+            val h = m.groupValues[1].toInt(); val min = m.groupValues[2].toInt()
+            if (h > 23 || min > 59) continue
+            val at = d.atTime(h, min).atZone(zone).toInstant().toEpochMilli()
+            val hm = "%d:%02d".format(h, min)
+            items.add(Reminders.Item("task|${t.optString("id")}|$d|$hm", at, t.optString("title").trim(), "Úkol · $hm · $listName"))
+        }
+
         val taskHour = cfg.optInt("taskHour", 8)
         if (taskHour >= 0) {
             // ranní přehled: nejbližší taskHour (dnes, nebo zítra, když už je po něm)
-            var day = LocalDate.now(zone)
+            var day = today
             var at = day.atTime(taskHour, 0).atZone(zone)
             if (at.toInstant().toEpochMilli() <= System.currentTimeMillis()) { day = day.plusDays(1); at = day.atTime(taskHour, 0).atZone(zone) }
             val dueToday = ArrayList<String>(); var overdue = 0
-            val lists = get(token, "$TASKS/users/@me/lists?maxResults=100").optJSONArray("items")
-            if (lists != null) for (i in 0 until lists.length()) {
-                val listId = lists.getJSONObject(i).optString("id")
-                val dueMax = day.plusDays(1).toString() + "T00:00:00.000Z"
-                val arr = try {
-                    get(token, "$TASKS/lists/${enc(listId)}/tasks?showCompleted=false&showHidden=false&maxResults=100&dueMax=${enc(dueMax)}").optJSONArray("items")
-                } catch (_: Exception) { null } ?: continue
-                for (k in 0 until arr.length()) {
-                    val t = arr.getJSONObject(k)
-                    val due = t.optString("due"); val title = t.optString("title").trim()
-                    if (due.length < 10 || title.isEmpty() || t.optString("status") == "completed") continue
-                    val d = LocalDate.parse(due.substring(0, 10))
-                    if (d == day) dueToday.add(title) else if (d.isBefore(day)) overdue++
-                }
+            for ((_, d, t) in open) {
+                if (d == day) dueToday.add(t.optString("title").trim()) else if (d.isBefore(day)) overdue++
             }
             if (dueToday.isNotEmpty() || overdue > 0) {
                 val title = if (dueToday.isEmpty()) "Úkoly po termínu: $overdue"

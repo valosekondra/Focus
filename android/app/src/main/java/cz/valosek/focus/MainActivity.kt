@@ -2,6 +2,9 @@ package cz.valosek.focus
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlertDialog
+import android.webkit.JsResult
+import android.webkit.WebChromeClient
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -68,6 +71,22 @@ class MainActivity : ComponentActivity() {
                 val url = request.url.toString()
                 if (url.startsWith(URL)) return false
                 try { startActivity(Intent(Intent.ACTION_VIEW, request.url)) } catch (_: Exception) { }
+                return true
+            }
+        }
+        // pojistka: bez WebChromeClient by alert()/confirm() ze stránky tiše vrátily „ne“
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onJsConfirm(view: WebView, url: String, message: String, result: JsResult): Boolean {
+                AlertDialog.Builder(this@MainActivity).setMessage(message)
+                    .setPositiveButton("OK") { _, _ -> result.confirm() }
+                    .setNegativeButton("Zrušit") { _, _ -> result.cancel() }
+                    .setOnCancelListener { result.cancel() }.show()
+                return true
+            }
+            override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean {
+                AlertDialog.Builder(this@MainActivity).setMessage(message)
+                    .setPositiveButton("OK") { _, _ -> result.confirm() }
+                    .setOnCancelListener { result.confirm() }.show()
                 return true
             }
         }

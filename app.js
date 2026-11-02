@@ -378,12 +378,20 @@ function overviewHtml() {
 }
 
 // ----- Úkoly -----
+// Google úkoly přes API čas neumí (jen datum) – ukládáme ho na konec poznámky jako „⏰ 14:30“.
+// Vidí ho i Google Tasks a podle něj Android appka připomene úkol v daný čas.
+const TIME_RE = /\n?⏰\s*(\d{1,2}):(\d{2})\s*$/;
+function taskTime(t) { const m = TIME_RE.exec(t.notes || ""); return m ? m[1].padStart(2, "0") + ":" + m[2] : ""; }
+function notesWithTime(notes, time) { const base = (notes || "").replace(TIME_RE, "").trimEnd(); return time ? (base ? base + "\n" : "") + "⏰ " + time : base; }
+function notesText(notes) { return (notes || "").replace(TIME_RE, "").trim(); }
+function dueAt(t) { if (!t.due) return 9e15; const tm = taskTime(t); return +t.due + (tm ? (+tm.slice(0, 2) * 60 + +tm.slice(3)) * 60000 : 86399000); }
+
 function dueChip(t) {
   if (!t.due) return "";
-  const today = sod(new Date()), diff = Math.round((t.due - today) / 86400000);
+  const today = sod(new Date()), diff = Math.round((t.due - today) / 86400000), tm = taskTime(t);
   const cls = diff < 0 ? "late" : diff === 0 ? "today" : "";
   const txt = diff === 0 ? "dnes" : diff === 1 ? "zítra" : diff === -1 ? "včera" : diff > 1 && diff < 7 ? DAYS[t.due.getDay()] : t.due.getDate() + ". " + (t.due.getMonth() + 1) + ".";
-  return `<span class="due ${cls}">${txt}</span>`;
+  return `<span class="due ${cls}">${txt}${tm ? " " + tm : ""}</span>`;
 }
 function doneWhen(t) {
   if (!t.completed) return "splněno";
@@ -404,7 +412,7 @@ function taskRow(t, opts) {
 
 function tasksHtml() {
   const f = S.listFilter, inList = t => f === "all" || t.listId === f;
-  const open = S.tasks.filter(t => !t.done && inList(t)).sort((a, b) => (a.due ? +a.due : 9e15) - (b.due ? +b.due : 9e15) || a.title.localeCompare(b.title, "cs"));
+  const open = S.tasks.filter(t => !t.done && inList(t)).sort((a, b) => dueAt(a) - dueAt(b) || a.title.localeCompare(b.title, "cs"));
   const done = S.tasks.filter(t => t.done && inList(t)).sort((a, b) => (b.completed || 0) - (a.completed || 0));
   const showList = f === "all" && S.lists.length > 1;
   let html = `<div class="lists"><button class="pill${f === "all" ? " on" : ""}" data-act="list" data-id="all">Vše<span class="n">${S.tasks.filter(t => !t.done).length}</span></button>`;
@@ -415,7 +423,7 @@ function tasksHtml() {
   let any = false;
   groups.forEach(([name, fn]) => {
     const items = open.filter(fn); if (!items.length) return; any = true;
-    html += `<div class="caption">${name} · ${items.length}</div><div class="card">${items.map(t => taskRow(t, { showList, hideDue: name === "Dnes" })).join("")}</div>`;
+    html += `<div class="caption">${name} · ${items.length}</div><div class="card">${items.map(t => taskRow(t, { showList })).join("")}</div>`;
   });
   if (!any) html += `<div class="card"><div class="empty">Všechno hotovo ✓</div></div>`;
   if (done.length) html += `<div class="caption">Hotové za 14 dní · ${done.length}</div><div class="card">${done.slice(0, store.get("doneAll", false) ? 999 : 8).map(t => taskRow(t, { showList })).join("")}
@@ -557,6 +565,18 @@ function openSheet(html, onMount) {
   $("#sheet-backdrop").classList.add("open"); $("#sheet").classList.add("open");
   if (onMount) onMount($("#sheet"));
 }
+// Potvrzení ve vzhledu appky (systémové confirm() v Android appce nefunguje – vrací rovnou „ne“).
+function askConfirm(text, okLabel) {
+  return new Promise(resolve => {
+    const box = document.createElement("div");
+    box.className = "confirm";
+    box.innerHTML = `<div class="confirm-card"><div class="confirm-text">${esc(text)}</div>
+      <div class="actions"><button type="button" class="btn secondary" data-c="0">Zrušit</button><button type="button" class="btn danger" data-c="1">${esc(okLabel || "Smazat")}</button></div></div>`;
+    const done = v => { box.remove(); resolve(v); };
+    box.onclick = e => { const b = e.target.closest("[data-c]"); if (b) done(b.dataset.c === "1"); else if (e.target === box) done(false); };
+    document.body.appendChild(box);
+  });
+}
 function closeSheet() { $("#sheet").classList.remove("open"); $("#sheet-backdrop").classList.remove("open"); }
 
 function calChips(selected, attr) {
@@ -606,8 +626,8 @@ function eventSheet(ev, presetStart) {
     }
     const del = sheet.querySelector('[data-sheet="delete"]');
     if (del) del.onclick = async () => {
-      if (!confirm("Smazat „" + ev.title + "“?")) return;
-      try { await api("DELETE", CAL_API + "/calendars/" + encodeURIComponent(ev.calId) + "/events/" + encodeURIComponent(ev.id)); S.events = S.events.filter(x => x !== ev); closeSheet(); render(); toast("Událost smazána"); }
+      if (!await askConfirm("Smazat událost „" + ev.title + "“?")) return;
+      try { await api("DELETE", CAL_API + "/calendars/" + encodeURIComponent(ev.calId) + "/events/" + encodeURIComponent(ev.id)); S.events = S.events.filter(x => x !== ev); pushNative(); closeSheet(); render(); toast("Událost smazána"); }
       catch (e) { sheet.querySelector("#everr").textContent = e.message; }
     };
     sheet.querySelector("#evf").onsubmit = async ev2 => {
@@ -646,27 +666,32 @@ function taskSheet(t) {
     <form id="tf">
       ${t ? "" : `<div class="chips">${S.lists.map(l => `<button type="button" class="chip${l.id === listId ? " on" : ""}" data-list="${esc(l.id)}">${esc(l.name)}</button>`).join("")}</div>`}
       <div class="group"><div class="field"><label>Název</label><input name="title" value="${t ? esc(t.title) : ""}" placeholder="Co je potřeba udělat" required></div>
-        <div class="field"><label>Termín</label><input type="date" name="due" value="${t && t.due ? ymd(t.due) : ""}"></div></div>
+        <div class="field"><label>Termín</label><input type="date" name="due" value="${t && t.due ? ymd(t.due) : ""}"></div>
+        <div class="field"><label>Čas</label><input type="time" name="time" value="${t ? taskTime(t) : ""}"></div></div>
       <div class="chips">${[["Dnes", 0], ["Zítra", 1], ["Příští týden", 7 - ((today.getDay() + 6) % 7)], ["Bez termínu", null]].map(([n, d]) => `<button type="button" class="chip" data-due="${d === null ? "" : ymd(addDays(today, d))}">${n}</button>`).join("")}</div>
-      ${t && t.notes ? `<div class="hint" style="white-space:pre-wrap">${esc(t.notes)}</div>` : ""}
+      <div class="hint" style="margin:-4px 2px 10px">${NATIVE ? "S časem tě telefon na úkol upozorní." : "Čas se uloží do poznámky úkolu (Google ho přes API jinak neumí)."}</div>
+      ${t && notesText(t.notes) ? `<div class="hint" style="white-space:pre-wrap">${esc(notesText(t.notes))}</div>` : ""}
       <div class="err" id="terr"></div>
       <div class="actions">${t ? `<button type="button" class="btn danger" data-sheet="delete">Smazat</button>` : ""}<button class="btn primary">${t ? "Uložit" : "Přidat"}</button></div>
     </form>`, sheet => {
     sheet.querySelectorAll("[data-list]").forEach(b => b.onclick = () => { listId = b.dataset.list; sheet.querySelectorAll("[data-list]").forEach(x => x.classList.toggle("on", x === b)); });
-    sheet.querySelectorAll("[data-due]").forEach(b => b.onclick = () => { sheet.querySelector('[name="due"]').value = b.dataset.due; });
+    sheet.querySelectorAll("[data-due]").forEach(b => b.onclick = () => { sheet.querySelector('[name="due"]').value = b.dataset.due; if (!b.dataset.due) sheet.querySelector('[name="time"]').value = ""; });
     const del = sheet.querySelector('[data-sheet="delete"]');
     if (del) del.onclick = async () => {
-      if (!confirm("Smazat úkol „" + t.title + "“?")) return;
-      try { await api("DELETE", TASK_API + "/lists/" + encodeURIComponent(t.listId) + "/tasks/" + encodeURIComponent(t.id)); S.tasks = S.tasks.filter(x => x !== t); store.set("tasks", S.tasks); closeSheet(); render(); toast("Úkol smazán"); }
+      if (!await askConfirm("Smazat úkol „" + t.title + "“?")) return;
+      try { await api("DELETE", TASK_API + "/lists/" + encodeURIComponent(t.listId) + "/tasks/" + encodeURIComponent(t.id)); S.tasks = S.tasks.filter(x => x !== t); store.set("tasks", S.tasks); pushNative(); closeSheet(); render(); toast("Úkol smazán"); }
       catch (e) { sheet.querySelector("#terr").textContent = e.message; }
     };
     sheet.querySelector("#tf").onsubmit = async e => {
       e.preventDefault();
-      const f = new FormData(e.target), title = f.get("title").trim(), dueS = f.get("due");
-      const body = { title, due: dueS ? dueS + "T00:00:00.000Z" : null };
+      const f = new FormData(e.target), title = f.get("title").trim(), timeS = f.get("time") || "";
+      const dueS = f.get("due") || (timeS ? ymd(today) : "");   // čas bez data = dnes
+      const notes = notesWithTime(t ? t.notes : "", timeS);
+      const body = { title, due: dueS ? dueS + "T00:00:00.000Z" : null, notes };
       try {
-        if (t) { await api("PATCH", TASK_API + "/lists/" + encodeURIComponent(t.listId) + "/tasks/" + encodeURIComponent(t.id), body); t.title = title; t.due = dueS ? parseYmd(dueS) : null; }
-        else { if (!body.due) delete body.due; const r = await api("POST", TASK_API + "/lists/" + encodeURIComponent(listId) + "/tasks", body); S.tasks.push({ id: r.id, listId, title, notes: "", due: dueS ? parseYmd(dueS) : null, done: false, completed: null }); }
+        if (t) { await api("PATCH", TASK_API + "/lists/" + encodeURIComponent(t.listId) + "/tasks/" + encodeURIComponent(t.id), body); t.title = title; t.due = dueS ? parseYmd(dueS) : null; t.notes = notes; }
+        else { if (!body.due) delete body.due; if (!notes) delete body.notes; const r = await api("POST", TASK_API + "/lists/" + encodeURIComponent(listId) + "/tasks", body); S.tasks.push({ id: r.id, listId, title, notes, due: dueS ? parseYmd(dueS) : null, done: false, completed: null }); }
+        pushNative();   // telefon hned přeplánuje připomínky
         store.set("tasks", S.tasks); closeSheet(); render(); toast(t ? "Uloženo" : "Úkol přidán");
       } catch (e2) { sheet.querySelector("#terr").textContent = e2.message === "auth" ? "Přihlášení vypršelo – obnov ho nahoře." : e2.message; }
     };

@@ -194,6 +194,11 @@ main { padding: 0 12px; }
 .signin h1 { margin: 6px 0 0; font-size: 26px; }
 .signin p { margin: 0; color: var(--muted); max-width: 320px; }
 
+.confirm { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.confirm-card { width: 100%; max-width: 360px; background: var(--card); border-radius: 18px; padding: 18px 16px 14px; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+.confirm-text { font-size: 15px; line-height: 1.4; margin-bottom: 14px; }
+.confirm .actions { display: flex; gap: 8px; justify-content: flex-end; }
+.confirm .btn { flex: 1; }
 .toast { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); opacity: 0; transition: all .2s; z-index: 30; background: var(--ink); color: var(--on-ink); padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: 86vw; pointer-events: none; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .banner { margin: 0 4px 12px; padding: 10px 14px; border-radius: 12px; background: var(--amber-bg); color: var(--amber); font-size: 13px; display: flex; gap: 10px; align-items: center; }
