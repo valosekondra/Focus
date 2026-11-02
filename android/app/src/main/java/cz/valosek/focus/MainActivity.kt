@@ -24,6 +24,7 @@ import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
 import org.json.JSONObject
+import kotlin.concurrent.thread
 
 // Obal kolem telefonní appky Focus (GitHub Pages). Stránka je stejná jako v Chromu, appka k ní přidává
 // nativní přihlášení Googlem (v WebView Google přihlášení nepovolí) a oznámení.
@@ -106,9 +107,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // při otevření appky synchronizovat hned (přímo, nečekat na plánovač na pozadí)
     override fun onResume() {
         super.onResume()
-        Sync.now(this)
+        syncDirect()
+    }
+
+    private fun syncDirect() {
+        val app = applicationContext
+        thread { Sync.runLogged(app); runOnUiThread { web.evaluateJavascript("window.__focusSynced && window.__focusSynced()", null) } }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -170,8 +177,10 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface fun testNotification(title: String, text: String) { runOnUiThread { if (ours()) notifyNow(title, text) } }
         @JavascriptInterface fun setBars(color: String) { runOnUiThread { this@MainActivity.setBars(color) } }
         @JavascriptInterface fun getConfig(): String = Sync.config(this@MainActivity).toString()
-        @JavascriptInterface fun setConfig(json: String) { runOnUiThread { if (ours()) try { Sync.setConfig(this@MainActivity, json) } catch (_: Exception) { } } }
+        @JavascriptInterface fun setConfig(json: String) { runOnUiThread { if (ours()) try { Sync.setConfig(this@MainActivity, json); syncDirect() } catch (_: Exception) { } } }
         @JavascriptInterface fun lastSync(): Long = Reminders.prefs(this@MainActivity).getLong("lastSync", 0)
+        @JavascriptInterface fun syncStatus(): String = Sync.status(this@MainActivity)
+        @JavascriptInterface fun syncNow() { runOnUiThread { if (ours()) syncDirect() } }
         @JavascriptInterface fun notificationsAllowed(): Boolean =
             Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         @JavascriptInterface fun openExternal(url: String) {

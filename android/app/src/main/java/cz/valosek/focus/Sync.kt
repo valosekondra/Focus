@@ -38,7 +38,6 @@ object Sync {
 
     fun setConfig(ctx: Context, json: String) {
         Reminders.prefs(ctx).edit().putString("cfg", JSONObject(json).toString()).apply()
-        now(ctx)
     }
 
     fun periodic(ctx: Context) {
@@ -89,9 +88,34 @@ object Sync {
         } finally { c.disconnect() }
     }
 
-    fun run(ctx: Context) {
+    // Spustí synchronizaci a výsledek (nebo chybu) uloží pro Nastavení v appce – ať je vidět, co se děje.
+    @Synchronized
+    fun runLogged(ctx: Context): Boolean {
+        val p = Reminders.prefs(ctx)
+        return try {
+            val info = run(ctx)
+            p.edit().putString("lastInfo", info).remove("lastError").apply()
+            true
+        } catch (e: Throwable) {
+            p.edit().putString("lastError", (e.javaClass.simpleName + ": " + (e.message ?: "")).take(300))
+                .putLong("lastErrorAt", System.currentTimeMillis()).apply()
+            false
+        }
+    }
+
+    fun status(ctx: Context): String {
+        val p = Reminders.prefs(ctx)
+        return JSONObject()
+            .put("last", p.getLong("lastSync", 0))
+            .put("info", p.getString("lastInfo", "") ?: "")
+            .put("error", p.getString("lastError", "") ?: "")
+            .put("errorAt", p.getLong("lastErrorAt", 0))
+            .toString()
+    }
+
+    private fun run(ctx: Context): String {
         val cfg = config(ctx)
-        val token = token(ctx) ?: return
+        val token = token(ctx) ?: throw RuntimeException("Google chce znovu potvrdit přístup – v appce se odhlas a přihlas.")
         val p = Reminders.prefs(ctx)
         val items = ArrayList<Reminders.Item>()
         val zone = ZoneId.systemDefault()
@@ -180,8 +204,11 @@ object Sync {
         }
         TaskNotify.sync(ctx, show, today)
 
-        Reminders.schedule(ctx, items.distinctBy { it.key })
+        val planned = items.distinctBy { it.key }
+        Reminders.schedule(ctx, planned)
         p.edit().putLong("lastSync", System.currentTimeMillis()).apply()
+        val ev = planned.count { !it.wake }
+        return "úkoly v oznámeních: ${show.size} · připomínky událostí: $ev · kalendářů: ${cals?.length() ?: 0}"
     }
 
     private fun declined(e: JSONObject): Boolean {
@@ -198,5 +225,5 @@ object Sync {
 
 class SyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
     override fun doWork(): Result =
-        try { Sync.run(applicationContext); Result.success() } catch (_: Exception) { Result.retry() }
+        if (Sync.runLogged(applicationContext)) Result.success() else Result.retry()
 }

@@ -125,6 +125,7 @@ function pushNative(patch) {
   c.calendars = selectedCals().map(x => x.id);
   NATIVE.setConfig(JSON.stringify(c));
 }
+window.__focusSynced = () => { if (S.view === "settings") render(); };   // telefon dokončil synchronizaci oznámení
 let nativeRenewing = null;
 function nativeRenew() { return nativeRenewing || (nativeRenewing = nativeSignIn(false).finally(() => { nativeRenewing = null; })); }
 
@@ -589,7 +590,13 @@ function settingsHtml() {
     [[-1, "Vypnuto"], [0, "Při začátku"], [5, "5 min"], [10, "10 min"], [15, "15 min"], [30, "30 min"], [60, "1 h"]].forEach(([k, n]) => { html += `<button class="chip${c.eventMin === k ? " on" : ""}" data-act="remind" data-k="eventMin" data-id="${k}">${n}</button>`; });
     html += `</div><p class="muted" style="font-size:12px;margin:0;padding:12px 6px 6px">Úkoly · od kolika ukazovat dnešní úkoly v oznámeních</p><div class="chips" style="padding:0 4px">`;
     [[-1, "Vypnuto"], [6, "6:00"], [7, "7:00"], [8, "8:00"], [9, "9:00"]].forEach(([k, n]) => { html += `<button class="chip${c.taskHour === k ? " on" : ""}" data-act="remind" data-k="taskHour" data-id="${k}">${n}</button>`; });
-    html += `</div><div class="card" style="margin-top:10px"><div class="row"><div class="grow">Zkušební oznámení<div class="sub">Android appka ${esc(NATIVE.version())}${last ? " · připomínky aktualizovány v " + hm(new Date(last)) : ""}</div></div>
+    // stav synchronizace telefonu (co naposledy naplánoval, případně chyba) – kvůli ladění oznámení
+    let st = {}; try { st = NATIVE.syncStatus ? JSON.parse(NATIVE.syncStatus()) : {}; } catch (e) { }
+    const when = ms => ms ? (sameDay(new Date(ms), new Date()) ? "" : new Date(ms).getDate() + ". " + (new Date(ms).getMonth() + 1) + ". ") + hm(new Date(ms)) : "nikdy";
+    html += `</div><div class="card" style="margin-top:10px"><div class="row"><div class="grow">Synchronizace oznámení<div class="sub">Naposledy v pořádku: ${when(st.last || last)}${st.info ? "<br>" + esc(st.info) : ""}</div>
+      ${st.error ? `<div class="sub" style="color:var(--red)">Chyba ${when(st.errorAt)}: ${esc(st.error)}</div>` : ""}</div>
+      ${NATIVE.syncNow ? `<button class="btn secondary" data-act="syncnow" style="height:36px;padding:0 12px;font-size:13px">Teď</button>` : ""}</div>
+      <div class="row"><div class="grow">Zkušební oznámení<div class="sub">Android appka ${esc(NATIVE.version())}</div></div>
     <button class="btn secondary" data-act="testnotify" style="height:36px;padding:0 12px;font-size:13px">Vyzkoušet</button></div></div><div>`;
   } else if (NATIVE) html += `</div><div class="caption">Oznámení</div><div class="card"><div class="row"><div class="grow">Zkušební oznámení<div class="sub">Android appka ${esc(NATIVE.version())}</div></div>
     <button class="btn secondary" data-act="testnotify" style="height:36px;padding:0 12px;font-size:13px">Vyzkoušet</button></div></div><div>`;
@@ -784,6 +791,7 @@ document.addEventListener("click", async e => {
       render(); return refresh();
     }
     if (act === "caltarget") { store.set("calTarget", id); return render(); }
+    if (act === "syncnow") { NATIVE.syncNow(); toast("Synchronizuji…"); return; }
     if (act === "remind") { pushNative({ [a.dataset.k]: +id }); return render(); }
     if (act === "testnotify") { NATIVE.testNotification("Focus", "Oznámení fungují 👍"); return; }
     if (act === "theme") { store.set("theme", id); applyTheme(); return render(); }
