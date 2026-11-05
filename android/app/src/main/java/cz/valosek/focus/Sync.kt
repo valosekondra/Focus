@@ -88,6 +88,72 @@ object Sync {
         } finally { c.disconnect() }
     }
 
+    // Denní rutina: seznam {title, time "HH:mm", days "1234567" (po=1 … ne=7)}; dá se přepsat v nastavení (cfg.routine).
+    const val ROUTINE_LIST = "Daily routine"
+    private val DEFAULT_ROUTINE = """[
+        {"title":"Wake up","time":"04:30","days":"12345"},
+        {"title":"Namazat mast","time":"05:00","days":"1234567"},
+        {"title":"Namazat mast","time":"20:00","days":"1234567"},
+        {"title":"Wind down, no screens","time":"20:00","days":"12347"},
+        {"title":"Go to sleep","time":"21:00","days":"12347"}]"""
+
+    private fun send(token: String, method: String, url: String, json: String?): JSONObject {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.requestMethod = if (method == "PATCH") "POST" else method
+        if (method == "PATCH") c.setRequestProperty("X-HTTP-Method-Override", "PATCH")
+        c.setRequestProperty("Authorization", "Bearer $token")
+        c.connectTimeout = 20000; c.readTimeout = 20000
+        try {
+            if (json != null) {
+                c.setRequestProperty("Content-Type", "application/json"); c.doOutput = true
+                c.outputStream.use { it.write(json.toByteArray()) }
+            }
+            if (c.responseCode !in 200..299) throw RuntimeException("Google ${c.responseCode}")
+            val body = c.inputStream.bufferedReader().use { it.readText() }
+            return if (body.isBlank()) JSONObject() else JSONObject(body)
+        } finally { c.disconnect() }
+    }
+
+    // Založí úkoly rutiny na dnešek a zítřek (s časem „⏰ HH:mm“ v poznámce → oznámení v ten čas).
+    // Co už v seznamu na ten den je (i splněné), znovu nezakládá.
+    private fun ensureRoutine(ctx: Context, token: String, cfg: JSONObject, today: LocalDate) {
+        val p = Reminders.prefs(ctx)
+        val routine = cfg.optJSONArray("routine") ?: org.json.JSONArray(DEFAULT_ROUTINE)
+        if (routine.length() == 0) return
+        if (p.getString("routineDone", "") == today.toString()) return
+        val lists = get(token, "$TASKS/users/@me/lists?maxResults=100").optJSONArray("items")
+        var listId: String? = null
+        if (lists != null) for (i in 0 until lists.length()) {
+            val l = lists.getJSONObject(i)
+            if (l.optString("title") == ROUTINE_LIST) listId = l.optString("id")
+        }
+        if (listId == null) listId = send(token, "POST", "$TASKS/users/@me/lists", JSONObject().put("title", ROUTINE_LIST).toString()).optString("id")
+        // nesplněná rutina z minulých dnů se neodkládá – smazat, ať nevisí „po termínu“
+        val old = get(token, "$TASKS/lists/${enc(listId!!)}/tasks?showCompleted=false&maxResults=100&dueMax=${enc(today.toString() + "T00:00:00.000Z")}").optJSONArray("items")
+        if (old != null) for (k in 0 until old.length())
+            try { send(token, "DELETE", "$TASKS/lists/${enc(listId)}/tasks/${enc(old.getJSONObject(k).optString("id"))}", null) } catch (_: Exception) { }
+        for (day in listOf(today, today.plusDays(1))) {
+            val dueMin = day.toString() + "T00:00:00.000Z"; val dueMax = day.plusDays(1).toString() + "T00:00:00.000Z"
+            val have = HashSet<String>()
+            val arr = get(token, "$TASKS/lists/${enc(listId!!)}/tasks?showCompleted=true&showHidden=true&maxResults=100&dueMin=${enc(dueMin)}&dueMax=${enc(dueMax)}").optJSONArray("items")
+            if (arr != null) for (k in 0 until arr.length()) {
+                val t = arr.getJSONObject(k)
+                have.add(t.optString("title").trim() + "|" + (TIME_RE.find(t.optString("notes"))?.value ?: ""))
+            }
+            val dow = day.dayOfWeek.value.toString()
+            for (i in 0 until routine.length()) {
+                val r = routine.getJSONObject(i)
+                if (!r.optString("days", "1234567").contains(dow)) continue
+                val title = r.optString("title").trim(); val time = r.optString("time")
+                val mark = "⏰ $time"
+                if ("$title|$mark" in have || title.isEmpty()) continue
+                send(token, "POST", "$TASKS/lists/${enc(listId)}/tasks", JSONObject().put("title", title).put("notes", mark).put("due", dueMin).toString())
+                have.add("$title|$mark")
+            }
+        }
+        p.edit().putString("routineDone", today.toString()).apply()
+    }
+
     // Spustí synchronizaci a výsledek (nebo chybu) uloží pro Nastavení v appce – ať je vidět, co se děje.
     @Synchronized
     fun runLogged(ctx: Context): Boolean {
@@ -167,6 +233,9 @@ object Sync {
         val shown = (p.getStringSet("shown", emptySet()) ?: emptySet()).filter { it in eventKeys }.toMutableSet()
         for (it in immediate) if (shown.add(it.key)) Notify.show(ctx, it.title, it.text, it.key.hashCode())
         p.edit().putStringSet("shown", shown).apply()
+
+        // ----- denní rutina: Google úkoly neumí opakování, tak ji appka zakládá sama na dnešek a zítřek -----
+        try { ensureRoutine(ctx, token, cfg, LocalDate.now(zone)) } catch (_: Exception) { }
 
         // ----- úkoly: každý dnešní a zpožděný úkol jako oznámení, dokud ho neodklikneš nebo nesplníš -----
         val today = LocalDate.now(zone)
